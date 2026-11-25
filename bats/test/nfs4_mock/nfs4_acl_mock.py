@@ -20,16 +20,25 @@ def key(path):
     return os.path.join(store, str(os.lstat(path).st_ino))
 
 def mode_acl(path):
-    m = os.lstat(path).st_mode
+    """Mode bits as Qumulo shows them: numeric owner/group ACEs, no OWNER@."""
+    st = os.lstat(path)
+    m = st.st_mode
+    d = stat.S_ISDIR(m)
     def p(r, w, x):
         s = ""
         if m & r: s += "r"
-        if m & w: s += "wa" + ("D" if stat.S_ISDIR(m) else "")
+        if m & w: s += "wa" + ("D" if d else "")
         if m & x: s += "x"
-        return s + "tcy"
-    return ["A::OWNER@:" + p(stat.S_IRUSR, stat.S_IWUSR, stat.S_IXUSR) + "TC",
-            "A:g:GROUP@:" + p(stat.S_IRGRP, stat.S_IWGRP, stat.S_IXGRP),
-            "A::EVERYONE@:" + p(stat.S_IROTH, stat.S_IWOTH, stat.S_IXOTH)]
+        s += "t"
+        if m & w: s += "T"
+        if m & r: s += "n"
+        if m & w: s += "N"
+        return s + "cy"
+    out = ["A::%d:%s" % (st.st_uid, p(stat.S_IRUSR, stat.S_IWUSR, stat.S_IXUSR)),
+           "A:g:%d:%s" % (st.st_gid, p(stat.S_IRGRP, stat.S_IWGRP, stat.S_IXGRP))]
+    if m & 0o7:
+        out.append("A::EVERYONE@:" + p(stat.S_IROTH, stat.S_IWOTH, stat.S_IXOTH))
+    return out
 
 def get(path):
     k = key(path)
@@ -53,7 +62,7 @@ def inherit(parent, new):
     out = []
     for a in get(parent):
         t, fl, who, perm = a.split(":")
-        if "@" in who and who.endswith("@"):
+        if who.endswith("@") or ("f" not in fl and "d" not in fl):
             continue
         if isdir and "d" in fl:
             out.append("%s:%s:%s:%s" % (t, fl.replace("i", ""), who, perm))

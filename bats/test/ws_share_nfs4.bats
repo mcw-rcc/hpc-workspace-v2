@@ -1,6 +1,7 @@
 # Tests for the MCW RCC NFSv4 ACL backend of ws_share.
 # nfs4_getfacl/nfs4_setfacl are replaced by a test double (nfs4_mock/) that
-# keeps ACLs in a side store, so these run on any local filesystem.
+# keeps ACLs in a side store and shows mode bits the way Qumulo does (numeric
+# owner/group ACEs), so these run on any local filesystem.
 
 setup() {
     load 'test_helper/common-setup'
@@ -23,11 +24,14 @@ EOF
     export PATH="$MOCKBIN:$PROJECT_ROOT/../bin:$PATH"
     export NFS4_MOCK_STORE="$BATS_TEST_TMPDIR/acls"
     export WS_SHARE_ACL_BACKEND=nfs4
-    export WS_SHARE_NFS4_DOMAIN=example.org
-    export WS_SHARE_NFS4_IDFORMAT=auto
+    export WS_SHARE_NFS4_IDFORMAT=numeric
     U=nobody
     G=$(id -gn nobody)
-    export U G WS
+    UID_U=$(id -u nobody)
+    GID_G=$(getent group "$G" | cut -d: -f3)
+    OWNER_UID=$(stat -c %u "$WS")
+    OWNER_GID=$(stat -c %g "$WS")
+    export U G UID_U GID_G OWNER_UID OWNER_GID WS
 }
 
 acl() { nfs4_getfacl "$1" | grep -v '^#'; }
@@ -37,28 +41,47 @@ acl() { nfs4_getfacl "$1" | grep -v '^#'; }
     assert_success
     assert_output --partial "Granting rX access for user $U"
     run acl "$WS"
-    assert_line --index 0 "A:d:$U@example.org:rxtcy"
-    assert_line --index 1 "A:fi:$U@example.org:rtcy"
+    assert_line --index 0 "A:fd:$UID_U:rxtncy"
     run acl "$WS/sub/deeper"
-    assert_line --index 0 "A:d:$U@example.org:rxtcy"
+    assert_line --index 0 "A:fd:$UID_U:rxtncy"
     run acl "$WS/data.txt"
-    assert_line --index 0 "A::$U@example.org:rtcy"
+    assert_line --index 0 "A::$UID_U:rtncy"
     run acl "$WS/run.sh"
-    assert_line --index 0 "A::$U@example.org:rxtcy"
+    assert_line --index 0 "A::$UID_U:rxtncy"
     run acl "$WS/sub/deeper/f"
-    assert_line --index 0 "A::$U@example.org:rtcy"
+    assert_line --index 0 "A::$UID_U:rtncy"
 }
 
 @test "nfs4 share readwrite writes the mapped ACEs" {
     run ws_share --readwrite share ws $U
     assert_success
     run acl "$WS"
-    assert_line --index 0 "A:d:$U@example.org:rwaDxtcy"
-    assert_line --index 1 "A:fi:$U@example.org:rwatcy"
+    assert_line --index 0 "A:fd:$UID_U:rwaDxtTnNcy"
     run acl "$WS/data.txt"
-    assert_line --index 0 "A::$U@example.org:rwatcy"
+    assert_line --index 0 "A::$UID_U:rwatTnNcy"
     run acl "$WS/run.sh"
-    assert_line --index 0 "A::$U@example.org:rwaxtcy"
+    assert_line --index 0 "A::$UID_U:rwaxtTnNcy"
+}
+
+@test "nfs4 readwrite share grants what Qumulo gives the owning group for rwx" {
+    chmod 2770 "$WS"
+    run ws_share --readwrite share ws $U
+    run acl "$WS"
+    assert_line "A:fd:$UID_U:rwaDxtTnNcy"
+    assert_line "A:g:$OWNER_GID:rwaDxtTnNcy"
+}
+
+@test "nfs4 name@domain principals" {
+    export WS_SHARE_NFS4_IDFORMAT=name WS_SHARE_NFS4_DOMAIN=example.org
+    run ws_share share ws $U
+    assert_success
+    run acl "$WS"
+    assert_line --index 0 "A:fd:$U@example.org:rxtncy"
+    run ws_share list ws
+    assert_line --regexp "^user +$U +read$"
+    ws_share unshare ws $U
+    run acl "$WS"
+    refute_output --partial "$U@"
 }
 
 @test "nfs4 share skips symlinks" {
@@ -73,88 +96,98 @@ acl() { nfs4_getfacl "$1" | grep -v '^#'; }
     run ws_share --readwrite share ws $U
     assert_success
     run acl "$WS"
-    assert_output --partial "A:d:$U@example.org:rwaDxtcy"
-    refute_output --partial "A:d:$U@example.org:rxtcy"
-    run bash -c "nfs4_getfacl '$WS/data.txt' | grep -c '$U@'"
+    assert_line --index 0 "A:fd:$UID_U:rwaDxtTnNcy"
+    refute_output --partial "A:fd:$UID_U:rxtncy"
+    run bash -c "nfs4_getfacl '$WS/data.txt' | grep -c ':$UID_U:'"
     assert_output "1"
 }
 
-@test "nfs4 new files and directories inherit like POSIX default entries" {
+@test "nfs4 new files and directories inherit the grant" {
     ws_share share ws $U
     mkdir "$WS/newdir"; nfs4_setfacl --mock-create "$WS" "$WS/newdir"
     echo x > "$WS/newdir/newfile"; nfs4_setfacl --mock-create "$WS/newdir" "$WS/newdir/newfile"
     run acl "$WS/newdir"
-    assert_output --partial "A:d:$U@example.org:rxtcy"
-    assert_output --partial "A:fi:$U@example.org:rtcy"
+    assert_output --partial "A:fd:$UID_U:rxtncy"
     run acl "$WS/newdir/newfile"
-    assert_output --partial "A::$U@example.org:rtcy"
+    assert_output --partial "A::$UID_U:rxtncy"
 }
 
 @test "nfs4 unshare removes only that user" {
     ws_share share ws $U
-    ws_share share ws root
+    ws_share share ws daemon
     run ws_share unshare ws $U
     assert_success
     assert_output --partial "Removing access for $U"
     run acl "$WS"
-    refute_output --partial "$U@"
-    assert_output --partial "A:d:root@example.org:rxtcy"
+    refute_output --partial ":$UID_U:"
+    assert_output --partial "A:fd:$(id -u daemon):rxtncy"
     run acl "$WS/sub/deeper/f"
-    refute_output --partial "$U@"
-    assert_output --partial "OWNER@"
+    refute_output --partial ":$UID_U:"
+    assert_line "A::$OWNER_UID:rwatTnNcy"
 }
 
 @test "nfs4 unshare of a user without grants succeeds and changes nothing" {
     run ws_share unshare ws $U
     assert_success
-    run grep -c -- "-e" "$NFS4_MOCK_STORE/calls.log"
+    run grep -c -- " -e " "$NFS4_MOCK_STORE/calls.log"
     assert_output "0"
 }
 
-@test "nfs4 user and group of the same name are kept apart" {
-    ws_share --yes sharegroup ws root
-    ws_share share ws root
-    run ws_share unsharegroup ws root
+@test "nfs4 user and group with the same id are kept apart" {
+    ws_share --yes sharegroup ws daemon
+    ws_share share ws daemon
+    run ws_share unsharegroup ws daemon
     assert_success
     run acl "$WS"
-    refute_output --partial "A:dg:root@"
-    assert_output --partial "A:d:root@example.org:rxtcy"
+    refute_output --partial "A:fdg:$(getent group daemon | cut -d: -f3):"
+    assert_output --partial "A:fd:$(id -u daemon):rxtncy"
     run acl "$WS/data.txt"
-    refute_output --partial "A:g:root@"
-    assert_output --partial "A::root@example.org:rtcy"
+    assert_output --partial "A::$(id -u daemon):rtncy"
 }
 
 @test "nfs4 sharegroup writes group ACEs" {
     run ws_share --readwrite --yes sharegroup ws $G
     assert_success
     run acl "$WS"
-    assert_line --index 0 "A:dg:$G@example.org:rwaDxtcy"
-    assert_line --index 1 "A:fig:$G@example.org:rwatcy"
+    assert_line --index 0 "A:fdg:$GID_G:rwaDxtTnNcy"
     run acl "$WS/data.txt"
-    assert_line --index 0 "A:g:$G@example.org:rwatcy"
+    assert_line --index 0 "A:g:$GID_G:rwatTnNcy"
 }
 
-@test "nfs4 unshare-all removes every named ACE and keeps the special ones" {
+@test "nfs4 unshare-all keeps the owner and owning-group ACEs" {
+    chmod 2770 "$WS"
     ws_share share ws $U
     ws_share --yes sharegroup ws $G
     run ws_share unshare-all ws
     assert_success
-    for f in "$WS" "$WS/data.txt" "$WS/sub/deeper/f"; do
+    run acl "$WS"
+    assert_output "$(printf 'A::%s:rwaDxtTnNcy\nA:g:%s:rwaDxtTnNcy' $OWNER_UID $OWNER_GID)"
+    for f in "$WS/data.txt" "$WS/sub/deeper/f"; do
         run acl "$f"
-        refute_output --partial "example.org"
-        assert_output --partial "OWNER@"
-        assert_output --partial "EVERYONE@"
+        refute_output --partial ":$UID_U:"
+        refute_output --partial "g:$GID_G:"
+        assert_line "A::$OWNER_UID:rwatTnNcy"
     done
 }
 
-@test "nfs4 list shows effective grants" {
+@test "nfs4 unsharegroup of the owning group keeps the group mode ACE" {
+    chmod 2770 "$WS"
+    group=$(stat -c %G "$WS")
+    ws_share --yes sharegroup ws "$group"
+    run ws_share unsharegroup ws "$group"
+    assert_success
+    run acl "$WS"
+    assert_line "A:g:$OWNER_GID:rwaDxtTnNcy"
+}
+
+@test "nfs4 list shows shares but not the owner or owning group" {
     ws_share share ws $U
     ws_share --readwrite --yes sharegroup ws $G
     run ws_share list ws
     assert_success
     assert_line --regexp "^user +$U +read$"
     assert_line --regexp "^group +$G +readwrite$"
-    refute_output --partial "OWNER"
+    assert_equal "${#lines[@]}" 2
 }
 
 @test "nfs4 check reports a consistent share" {
@@ -162,13 +195,13 @@ acl() { nfs4_getfacl "$1" | grep -v '^#'; }
     run ws_share check ws
     assert_success
     assert_output --partial "user $U: read"
+    refute_output --partial "Warning"
 }
 
 @test "nfs4 check flags a grant without inheritable ACE" {
     ws_share share ws $U
-    nfs4_getfacl "$WS" | grep -v '^#' | grep -v ':fi:' > "$BATS_TEST_TMPDIR/acl"
-    cp "$BATS_TEST_TMPDIR/acl" "$NFS4_MOCK_STORE/$(stat -c %i "$WS")"
-    sed -i "s/^A:d:/A::/" "$NFS4_MOCK_STORE/$(stat -c %i "$WS")"
+    store="$NFS4_MOCK_STORE/$(stat -c %i "$WS")"
+    sed -i "s/^A:fd:$UID_U:/A::$UID_U:/" "$store"
     run ws_share check ws
     assert_failure
     assert_output --partial "new files will not inherit"
@@ -180,17 +213,14 @@ acl() { nfs4_getfacl "$1" | grep -v '^#'; }
     assert_output --partial "not shared"
 }
 
-@test "nfs4 numeric principals" {
-    export WS_SHARE_NFS4_IDFORMAT=numeric
+@test "nfs4 auto id format is numeric when the client does not map ids" {
+    export WS_SHARE_NFS4_IDFORMAT=auto WS_SHARE_NFS4_DOMAIN=example.org
+    if [[ "$(cat /sys/module/nfs/parameters/nfs4_disable_idmapping 2>/dev/null)" == "N" ]]; then
+        skip "this host maps NFSv4 ids"
+    fi
     run ws_share share ws $U
-    assert_success
     run acl "$WS"
-    assert_line --index 0 "A:d:$(id -u $U):rxtcy"
-    run ws_share list ws
-    assert_line --regexp "^user +$U +read$"
-    run ws_share unshare ws $U
-    run acl "$WS"
-    refute_output --partial ":$(id -u $U):"
+    assert_line --index 0 "A:fd:$UID_U:rxtncy"
 }
 
 @test "nfs4 auto backend stays posix off nfs4 mounts" {

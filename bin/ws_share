@@ -29,35 +29,43 @@ maxmembers=100 # do not share with a group with more than $maxmembers members
 # ACLs (getfacl/setfacl). On those, ws_share uses nfs4_getfacl/nfs4_setfacl/
 # nfs4_editfacl and writes NFSv4 ACEs that grant exactly what the upstream
 # POSIX entries grant. Mapping (follows the Linux knfsd POSIX<->NFSv4 mapping,
-# draft-ietf-nfsv4-acl-mapping):
+# the mapping Qumulo itself uses for mode bits, so a shared user gets exactly
+# what the owning group would get with the same mode bits):
 #
-#   POSIX bit           NFSv4 permission letters
-#   r                   r   (READ_DATA / LIST_DIRECTORY)
-#   w                   wa  (WRITE_DATA, APPEND_DATA) + D (DELETE_CHILD) on dirs
-#   x                   x   (EXECUTE / traverse)
-#   (always)            tcy (READ_ATTRIBUTES, READ_ACL, SYNCHRONIZE)
+#   POSIX bit           NFSv4 permission letters (as Qumulo shows mode bits)
+#   r                   rn     (READ_DATA / LIST_DIRECTORY, READ_NAMED_ATTRS)
+#   w                   waTN   (WRITE_DATA, APPEND_DATA, WRITE_ATTRIBUTES,
+#                              WRITE_NAMED_ATTRS) + D (DELETE_CHILD) on dirs
+#   x                   x      (EXECUTE / traverse)
+#   (always)            tcy    (READ_ATTRIBUTES, READ_ACL, SYNCHRONIZE)
 #
-#   upstream entry                        NFSv4 ACE(s) written
-#   user:U:rX  on a directory             A:d:U:rxtcy      (this dir + new subdirs)
-#   default:user:U:rX on a directory      A:fi:U:rtcy      (new files, inherit-only)
-#   user:U:rX  on a file with any x bit   A::U:rxtcy
-#   user:U:rX  on a file without x bits   A::U:rtcy
-#   user:U:rwX on a directory             A:d:U:rwaDxtcy
-#   default:user:U:rwX on a directory     A:fi:U:rwatcy
-#   user:U:rwX on a file with any x bit   A::U:rwaxtcy
-#   user:U:rwX on a file without x bits   A::U:rwatcy
-#   group:G:...                           same, with the "g" flag added
-#   setfacl -x user:U,default:user:U      remove every ACE whose principal is U
-#   setfacl -b                            remove every ACE for a named principal
+#   upstream entries                          NFSv4 ACE written
+#   user:U:rX + default:user:U:rX  on a dir   A:fd:U:rxtncy
+#   user:U:rX  on a file with any x bit       A::U:rxtncy
+#   user:U:rX  on a file without x bits       A::U:rtncy
+#   user:U:rwX + default:user:U:rwX on a dir  A:fd:U:rwaDxtTnNcy
+#   user:U:rwX on a file with any x bit       A::U:rwaxtTnNcy
+#   user:U:rwX on a file without x bits       A::U:rwatTnNcy
+#   group:G:...                               same, with the "g" flag added
+#   setfacl -x user:U,default:user:U          remove the ACEs whose principal is U
+#   setfacl -b                                remove the ACEs of all named principals
+#
+# The one ACE per directory with "fd" is both the access and the default
+# entry. New files inherit the directory permissions including x; POSIX would
+# mask x by the create mode. That is deliberately never less permissive.
+#
+# Qumulo shows the owner and owning group as numeric ACEs (A::<uid>, A:g:<gid>)
+# instead of OWNER@/GROUP@. Those are the mode bits and are never removed or
+# reported as shares: for every file, ACEs for its own uid/gid are kept.
 #
 # New ACEs are inserted at the front of the ACL, so a named user/group grant
-# takes precedence over GROUP@/EVERYONE@ deny entries, as a POSIX named entry
-# takes precedence over the group/other class. Symbolic links are skipped, as
-# setfacl -R does.
+# takes precedence over deny entries, as a POSIX named entry takes precedence
+# over the group/other class. Symbolic links are skipped, as setfacl -R does.
 #
 # Site settings (environment overrides the defaults below):
 #   WS_SHARE_ACL_BACKEND    auto | posix | nfs4   (auto: nfs4 on nfs4 mounts)
-#   WS_SHARE_NFS4_IDFORMAT  auto | name | numeric (principal "user@domain" or uid)
+#   WS_SHARE_NFS4_IDFORMAT  auto | name | numeric (auto: numeric uid/gid unless
+#                           nfs4_disable_idmapping=N and a domain is known)
 #   WS_SHARE_NFS4_DOMAIN    NFSv4 id-mapping domain (default: nfsidmap -d,
 #                           then Domain in /etc/idmapd.conf)
 # ---------------------------------------------------------------------------
@@ -66,47 +74,64 @@ maxmembers=100 # do not share with a group with more than $maxmembers members
 : "${WS_SHARE_NFS4_DOMAIN:=}"
 
 # NFSv4 permission strings for the two upstream access levels (see table)
-nfs4_perms() { # <rX|rwX> <dir|file|execfile|newfile>
-    local rw=""
-    [[ "$1" == "rwX" ]] && rw="wa"
-    case "$2" in
-        dir)      if [[ -n "$rw" ]]; then echo "rwaDxtcy"; else echo "rxtcy"; fi ;;
-        execfile) echo "r${rw}xtcy" ;;
-        file|newfile) echo "r${rw}tcy" ;;
-    esac
+nfs4_perms() { # <rX|rwX> <dir|file|execfile>
+    if [[ "$1" == "rwX" ]]; then
+        case "$2" in
+            dir)      echo "rwaDxtTnNcy" ;;
+            execfile) echo "rwaxtTnNcy" ;;
+            file)     echo "rwatTnNcy" ;;
+        esac
+    else
+        case "$2" in
+            dir|execfile) echo "rxtncy" ;;
+            file)         echo "rtncy" ;;
+        esac
+    fi
 }
+
+# awk helper shared by the filter and the scanners: parses the drop spec
+# ("u|g <name> <id>" lines, or "*") and the keep spec ("<uid> <gid>") and
+# decides per ACE line whether it belongs to a principal being removed.
+NFS4_AWK_LIB='
+    function nfs4_init(drop, keep,    n, i, f, lines) {
+        split(keep, KEEP, " ")
+        ALL = (drop == "*")
+        n = split(drop, lines, "\n")
+        for (i = 1; i <= n; i++) {
+            split(lines[i], f, " ")
+            if (f[1] == "") continue
+            WANT[f[1] SUBSEP f[2]] = 1
+            if (f[3] != "") WANT[f[1] SUBSEP f[3]] = 1
+        }
+    }
+    # 1 if the ACE line is for a principal in the drop spec
+    function nfs4_match(line,    a, who, kind) {
+        if (line ~ /^[ \t]*(#|$)/) return 0
+        if (split(line, a, ":") < 4) return 0
+        who = a[3]
+        if (who ~ /@$/) return 0                     # OWNER@, GROUP@, EVERYONE@, ...
+        kind = (a[2] ~ /g/) ? "g" : "u"
+        sub(/@.*/, "", who)
+        # the file owner and owning group (Qumulo writes them as numeric ACEs)
+        if (kind == "u" && KEEP[1] != "" && who == KEEP[1]) return 0
+        if (kind == "g" && KEEP[2] != "" && who == KEEP[2]) return 0
+        if (ALL) return 1
+        return ((kind SUBSEP who) in WANT)
+    }
+'
 
 # Editor filter used through "EDITOR=$0 nfs4_setfacl -e": nfs4_setfacl writes
 # the ACL to a temp file, runs the editor on it and sets the edited result.
-# Drops every ACE for the principals listed in _WS_SHARE_NFS4_DROP (lines of
-# "u|g <name> <id>"), or for every named principal if it is "*".
+# Drops the ACEs selected by _WS_SHARE_NFS4_DROP, keeping those for the file's
+# own uid/gid given in _WS_SHARE_NFS4_KEEP.
 nfs4_filter_acl() {
-    local file="$1" tmp
+    local file="$1" tmp rc
     tmp=$(mktemp) || return 1
-    awk -v drop="$_WS_SHARE_NFS4_DROP" '
-        BEGIN {
-            all = (drop == "*")
-            n = split(drop, lines, "\n")
-            for (i = 1; i <= n; i++) {
-                split(lines[i], f, " ")
-                if (f[1] == "") continue
-                want[f[1] SUBSEP f[2]] = 1
-                if (f[3] != "") want[f[1] SUBSEP f[3]] = 1
-            }
-        }
-        /^[ \t]*(#|$)/ { print; next }
-        {
-            nf = split($0, a, ":")
-            if (nf < 4) { print; next }
-            who = a[3]
-            if (who ~ /@$/) { print; next }          # OWNER@, GROUP@, EVERYONE@, ...
-            if (all) next
-            kind = (a[2] ~ /g/) ? "g" : "u"
-            sub(/@.*/, "", who)
-            if ((kind SUBSEP who) in want) next
-            print
-        }' "$file" > "$tmp" && cat "$tmp" > "$file"
-    local rc=$?
+    awk -v drop="$_WS_SHARE_NFS4_DROP" -v keep="${_WS_SHARE_NFS4_KEEP:-}" \
+        "$NFS4_AWK_LIB"'
+        BEGIN { nfs4_init(drop, keep) }
+        !nfs4_match($0) { print }' "$file" > "$tmp" && cat "$tmp" > "$file"
+    rc=$?
     rm -f "$tmp"
     return $rc
 }
@@ -127,22 +152,32 @@ nfs4_domain() {
     echo "$d"
 }
 
-# principal string for nfs4_setfacl: <u|g> <name>
-nfs4_principal() {
-    local kind="$1" name="$2" id fmt="$WS_SHARE_NFS4_IDFORMAT" dom
-    if [[ "$kind" == "u" ]]; then
-        id=$(id -u "$name" 2>/dev/null)
+nfs4_id() { # <u|g> <name>
+    if [[ "$1" == "u" ]]; then
+        id -u "$2" 2>/dev/null
     else
-        id=$(getent group "$name" | cut -d: -f3)
+        getent group "$2" | cut -d: -f3
     fi
+}
+
+# principal string for nfs4_setfacl: <u|g> <name>
+# auto: numeric when the client does not map ids (nfs4_disable_idmapping=Y,
+# the default for sec=sys, as on the RCC Qumulo mounts), else name@domain.
+nfs4_principal() {
+    local kind="$1" name="$2" fmt="$WS_SHARE_NFS4_IDFORMAT" dom="" idmap=""
     if [[ "$fmt" == "auto" ]]; then
-        dom=$(nfs4_domain)
-        if [[ -n "$dom" ]]; then fmt="name"; else fmt="numeric"; fi
+        idmap=$(cat /sys/module/nfs/parameters/nfs4_disable_idmapping 2>/dev/null)
+        if [[ "$idmap" != "N" ]]; then
+            fmt="numeric"
+        else
+            dom=$(nfs4_domain)
+            if [[ -n "$dom" ]]; then fmt="name"; else fmt="numeric"; fi
+        fi
     fi
     if [[ "$fmt" == "numeric" ]]; then
-        echo "$id"
+        nfs4_id "$kind" "$name"
     else
-        [[ -z "${dom:-}" ]] && dom=$(nfs4_domain)
+        [[ -z "$dom" ]] && dom=$(nfs4_domain)
         if [[ -z "$dom" ]]; then
             echo "Error: no NFSv4 id-mapping domain found, set WS_SHARE_NFS4_DOMAIN" >&2
             return 1
@@ -153,38 +188,36 @@ nfs4_principal() {
 
 # "u|g <name> <id>" lines for the drop filter
 nfs4_drop_list() { # <u|g> name...
-    local kind="$1" name id out=""
+    local kind="$1" name out=""
     shift
     for name in "$@"; do
-        if [[ "$kind" == "u" ]]; then
-            id=$(id -u "$name" 2>/dev/null)
-        else
-            id=$(getent group "$name" | cut -d: -f3)
-        fi
-        out+="$kind $name $id"$'\n'
+        out+="$kind $name $(nfs4_id "$kind" "$name")"$'\n'
     done
     printf '%s' "$out"
 }
 
-# run the drop filter over the whole workspace tree (no symlinks)
+# Run the drop filter over the whole workspace tree (no symlinks). Files are
+# batched per owner uid:gid so the filter knows which ACEs are the mode bits.
 nfs4_drop() { # <drop-spec>
-    local self
+    local self pair rc=0
     self=$(readlink -f "$0")
-    find "$WS_PATH" ! -type l -exec env _WS_SHARE_NFS4_DROP="$1" EDITOR="$self" \
-        nfs4_setfacl -e {} + >/dev/null
+    while IFS= read -r pair; do
+        [[ -z "$pair" ]] && continue
+        find "$WS_PATH" ! -type l -uid "${pair%:*}" -gid "${pair#*:}" \
+            -exec env _WS_SHARE_NFS4_DROP="$1" _WS_SHARE_NFS4_KEEP="${pair%:*} ${pair#*:}" \
+            EDITOR="$self" nfs4_setfacl -e {} + >/dev/null || rc=1
+    done < <(find "$WS_PATH" ! -type l -printf '%U:%G\n' | sort -u)
+    return $rc
 }
 
-# true if any file in the tree has an ACE for one of the principals
+# true if any file in the tree may have an ACE for one of the principals
+# (owner ACEs are not excluded here; that only costs an unneeded drop pass)
 nfs4_tree_has() { # <drop-spec>
-    find "$WS_PATH" ! -type l -exec nfs4_getfacl {} + 2>/dev/null | awk -v drop="$1" '
-        BEGIN { n = split(drop, lines, "\n")
-                for (i = 1; i <= n; i++) { split(lines[i], f, " "); if (f[1] == "") continue
-                    want[f[1] SUBSEP f[2]] = 1; if (f[3] != "") want[f[1] SUBSEP f[3]] = 1 } }
-        /^[ \t]*(#|$)/ { next }
-        { if (split($0, a, ":") < 4) next; who = a[3]; if (who ~ /@$/) next
-          kind = (a[2] ~ /g/) ? "g" : "u"; sub(/@.*/, "", who)
-          if ((kind SUBSEP who) in want) { found = 1; exit } }
-        END { exit found ? 0 : 1 }'
+    find "$WS_PATH" ! -type l -exec nfs4_getfacl {} + 2>/dev/null |
+        awk -v drop="$1" "$NFS4_AWK_LIB"'
+            BEGIN { nfs4_init(drop, "") }
+            nfs4_match($0) { found = 1; exit }
+            END { exit found ? 0 : 1 }'
 }
 
 # grant <rX|rwX> to users (u) or groups (g); replaces earlier grants, like setfacl -m
@@ -195,8 +228,7 @@ nfs4_grant() { # <u|g> <rX|rwX> name...
     [[ "$kind" == "g" ]] && flag="g"
     for name in "$@"; do
         p=$(nfs4_principal "$kind" "$name") || return 1
-        spec_dir+="A:d${flag}:$p:$(nfs4_perms "$access" dir),"
-        spec_dir+="A:fi${flag}:$p:$(nfs4_perms "$access" newfile),"
+        spec_dir+="A:fd${flag}:$p:$(nfs4_perms "$access" dir),"
         spec_exec+="A:${flag}:$p:$(nfs4_perms "$access" execfile),"
         spec_file+="A:${flag}:$p:$(nfs4_perms "$access" file),"
     done
@@ -218,22 +250,26 @@ nfs4_revoke() { # <u|g> name...
 }
 
 # named grants on the workspace directory: "<user|group> <name> <eff> <dinh> <finh>"
-# eff/dinh/finh: "-" (none), "read" or "readwrite"
+# eff/dinh/finh: "-" (none), "read" or "readwrite". The owner uid and owning
+# gid (the mode bits on Qumulo) are not shares and are left out.
 nfs4_entries() {
-    local acl
+    local acl keep
     acl=$(nfs4_getfacl "$WS_PATH" 2>/dev/null) || return 1
-    awk -F: '
-        /^[ \t]*(#|$)/ { next }
-        $1 != "A" || NF < 4 || $3 ~ /@$/ { next }
+    keep=$(stat -c '%u %g' "$WS_PATH") || return 1
+    awk -v keep="$keep" "$NFS4_AWK_LIB"'
+        BEGIN { nfs4_init("*", keep) }
+        !nfs4_match($0) { next }
         {
-            kind = ($2 ~ /g/) ? "group" : "user"
-            who = $3; sub(/@.*/, "", who)
+            split($0, a, ":")
+            if (a[1] != "A") next
+            kind = (a[2] ~ /g/) ? "group" : "user"
+            who = a[3]; sub(/@.*/, "", who)
             k = kind " " who
             if (!(k in seen)) { seen[k] = 1; order[++n] = k; eff[k] = dinh[k] = finh[k] = "-" }
-            lvl = ($4 ~ /w/) ? "readwrite" : "read"
-            if ($2 !~ /i/) eff[k] = lvl
-            if ($2 ~ /d/) dinh[k] = lvl
-            if ($2 ~ /f/) finh[k] = lvl
+            lvl = (a[4] ~ /w/) ? "readwrite" : "read"
+            if (a[2] !~ /i/) eff[k] = lvl
+            if (a[2] ~ /d/) dinh[k] = lvl
+            if (a[2] ~ /f/) finh[k] = lvl
         }
         END { for (i = 1; i <= n; i++) print order[i], eff[order[i]], dinh[order[i]], finh[order[i]] }
     ' <<<"$acl"
