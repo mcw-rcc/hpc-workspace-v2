@@ -60,6 +60,7 @@ class DBEntryV1 : public DBEntry {
     string workspace;  // directory path
     long creation;     // epoch time of creation
     long expiration;   // epoch time of expiration, set when allocating
+    long extended = 0; // MCW: epoch time of last extension that consumed an extension, 0 = never
     long released;     // epoch time of manual release
     long expired;      // epoch time when expirer actually expired this file
     long reminder;     // epoch time of reminder to be sent out
@@ -111,6 +112,7 @@ class DBEntryV1 : public DBEntry {
     string getId() const;
     string getUsername() const;
     long getCreation() const;
+    long getLastExtension() const;
     string getWSPath() const;
     long getExpiration() const;
     long getReleaseTime() const;

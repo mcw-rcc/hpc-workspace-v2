@@ -392,6 +392,7 @@ DBEntryV1::DBEntryV1(FilesystemDBV1* pdb, const WsID _id, const string _username
     // init extra internals here to avoid problems in release builds
     released = 0;
     expired = 0;
+    extended = 0;
     acctcode = "";
 }
 
@@ -458,6 +459,7 @@ void DBEntryV1::readFromString(std::string str) {
     }
     released = dbentry["released"] ? dbentry["released"].as<long>() : 0;
     expiration = dbentry["expiration"] ? dbentry["expiration"].as<long>() : 0;
+    extended = dbentry["extended"] ? dbentry["extended"].as<long>() : 0; // MCW, absent in upstream entries
     expired = dbentry["expired"] ? dbentry["expired"].as<long>() : 0;
     reminder = dbentry["reminder"] ? dbentry["reminder"].as<long>() : 0;
     extensions = dbentry["extensions"] ? dbentry["extensions"].as<int>() : 0;
@@ -547,6 +549,11 @@ void DBEntryV1::readFromString(std::string str) {
         node >> expired;
     else
         expired = 0;
+    node = dbentry["extended"]; // MCW, absent in upstream entries
+    if (node.has_val())
+        node >> extended;
+    else
+        extended = 0;
     node = dbentry["reminder"];
     if (node.has_val())
         node >> reminder;
@@ -601,6 +608,10 @@ void DBEntryV1::useExtension(const long _expiration, const string _mailaddress, 
     if ((getuid() != 0) && (_expiration != -1) && (_expiration > expiration)) {
         extensions--;
     }
+    // MCW: remember when the current period started (also for root), for the extensionthreshold rule
+    if ((_expiration != -1) && (_expiration > expiration)) {
+        extended = time(0L);
+    }
     if ((extensions < 0) && (getuid() != 0)) {
         throw DatabaseException("no more extensions!");
     }
@@ -630,6 +641,8 @@ string DBEntryV1::getUsername() const {
 }
 
 long DBEntryV1::getCreation() const { return creation; }
+
+long DBEntryV1::getLastExtension() const { return extended; }
 
 string DBEntryV1::getWSPath() const { return workspace; };
 
@@ -993,6 +1006,9 @@ void DBEntryV1::writeEntry(const bool calledasroot) {
     if (expired > 0) {
         entry["expired"] = expired;
     }
+    if (extended > 0) {
+        entry["extended"] = extended;
+    }
     entry["extensions"] = extensions;
     entry["reminder"] = reminder;
     entry["mailaddress"] = mailaddress;
@@ -1018,6 +1034,9 @@ void DBEntryV1::writeEntry(const bool calledasroot) {
     root["expiration"] << expiration;
     if (expired > 0) {
         root["expired"] << expired;
+    }
+    if (extended > 0) {
+        root["extended"] << extended;
     }
     root["extensions"] << extensions;
     root["acctcode"] << acctcode;

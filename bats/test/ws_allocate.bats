@@ -128,9 +128,18 @@ setup() {
     run ws_allocate --config bats/ws.conf TOLONG 1000
     assert_output  --partial "Duration longer than allowed"
     assert_success
+    # MCW: a too long extension is rejected and does not consume an extension
     run ws_allocate --config bats/ws.conf -x TOLONG 1000
+    assert_failure
+    assert_output  --partial "longer than allowed for this workspace (maximum 32 days)"
+    assert_output  --partial "no extension was used"
+    run grep "^extensions: 3" /tmp/ws/ws2-db/${USER}-TOLONG
     assert_success
-    assert_output  --partial "Duration longer than allowed"
+    # a valid request then works and uses the extension
+    sed -i "s/^expiration: .*/expiration: $(( $(date +%s) + 24*3600 ))/" /tmp/ws/ws2-db/${USER}-TOLONG
+    run ws_allocate --config bats/ws.conf -x TOLONG 32
+    assert_success
+    assert_output --partial "remaining extensions  : 2"
     rm -f /tmp/ws/ws2-db/${USER}-TOLONG
 }
 

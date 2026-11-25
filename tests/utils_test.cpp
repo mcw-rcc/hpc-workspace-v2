@@ -521,3 +521,32 @@ TEST_CASE("utils::isValidWorkspaceName", "[utils]") {
         REQUIRE_FALSE(utils::isValidWorkspaceName(std::string(1000000, 'a') + "/"));
     }
 }
+
+// MCW: extension threshold rule
+TEST_CASE("utils::extensionAllowedAt", "[utils][mcw]") {
+    const long day = 24 * 3600;
+    const long start = 1'700'000'000;
+
+    SECTION("threshold 0 means always allowed") {
+        REQUIRE(utils::extensionAllowedAt(start, start + 60 * day, 0) == start);
+        REQUIRE(utils::extensionAllowedAt(start, start + 60 * day, -5) == start);
+    }
+    SECTION("75% of a 60 day period is day 45") {
+        REQUIRE(utils::extensionAllowedAt(start, start + 60 * day, 75) == start + 45 * day);
+    }
+    SECTION("75% of a 10 day period") {
+        REQUIRE(utils::extensionAllowedAt(start, start + 10 * day, 75) == start + 7 * day + 12 * 3600);
+    }
+    SECTION("rounds up, never early") {
+        // 75% of 3 seconds is 2.25 seconds -> 3
+        REQUIRE(utils::extensionAllowedAt(start, start + 3, 75) == start + 3);
+    }
+    SECTION("100% means at expiration, above 100 is capped") {
+        REQUIRE(utils::extensionAllowedAt(start, start + 60 * day, 100) == start + 60 * day);
+        REQUIRE(utils::extensionAllowedAt(start, start + 60 * day, 150) == start + 60 * day);
+    }
+    SECTION("empty or negative period") {
+        REQUIRE(utils::extensionAllowedAt(start, start, 75) == start);
+        REQUIRE(utils::extensionAllowedAt(start, start - day, 75) == start);
+    }
+}

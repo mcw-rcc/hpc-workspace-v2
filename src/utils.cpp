@@ -870,6 +870,19 @@ long long getFileTimeAsLong(const fs::path& p) {
     return std::chrono::duration_cast<std::chrono::seconds>(duration).count();
 }
 
+// MCW: earliest time an extension is allowed, see utils.h
+//  unittest: yes
+long extensionAllowedAt(const long periodstart, const long expiration, const int thresholdpercent) {
+    if (thresholdpercent <= 0 || expiration <= periodstart) {
+        return periodstart;
+    }
+    const long long pct = thresholdpercent > 100 ? 100 : thresholdpercent;
+    const long long period = static_cast<long long>(expiration) - periodstart;
+    // round up, so "75% elapsed" is never reached one second early
+    const long long needed = (period * pct + 99) / 100;
+    return static_cast<long>(periodstart + needed);
+}
+
 } // end of namespace utils
 
 // internal recursive functions, based on file handles
