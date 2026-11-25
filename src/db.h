@@ -98,6 +98,8 @@ class DBEntry {
     virtual string getUsername() const = 0;
     virtual int getExtension() const = 0;
     virtual long getCreation() const = 0;
+    // MCW: epoch time of the last extension that consumed an extension, 0 if never extended
+    virtual long getLastExtension() const = 0;
     virtual string getWSPath() const = 0;
     virtual string getMailaddress() const = 0;
     virtual string getComment() const = 0;

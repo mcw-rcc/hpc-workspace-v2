@@ -126,11 +126,11 @@ setup() {
 
 @test "ws_allocate too long duration (allocation and extension)" {
     run ws_allocate --config bats/ws.conf TOLONG 1000
-    assert_output  --partial "Duration longer than allowed"
+    assert_output  --partial "duration longer than allowed"
     assert_success
-    run ws_allocate --config bats/ws.conf -x TOLONG 1000
+    run ws_allocate --config bats/ws.conf --yes -x TOLONG 1000
     assert_success
-    assert_output  --partial "Duration longer than allowed"
+    assert_output  --partial "duration longer than allowed"
     rm -f /tmp/ws/ws2-db/${USER}-TOLONG
 }
 
@@ -278,27 +278,27 @@ setup() {
     assert_success
     assert_output --partial "remaining time in days: 10"
 
-    run ws_allocate --config bats/ws.conf -x extensiontest 20
+    run ws_allocate --yes --config bats/ws.conf -x extensiontest 20
     assert_success
     assert_output --partial "extending workspace"
     assert_output --partial "remaining extensions  : 2"
     assert_output --partial "remaining time in days: 20"
 
-    run ws_allocate --config bats/ws.conf -c "add a comment" -x extensiontest 1
+    run ws_allocate --yes --config bats/ws.conf -c "add a comment" -x extensiontest 1
     assert_success
     assert_output --partial "changed comment"
     assert_output --partial "remaining extensions  : 2"
     # FIXME: is 2 correct here??
 
-    run ws_allocate --config bats/ws.conf -x extensiontest 5
+    run ws_allocate --yes --config bats/ws.conf -x extensiontest 5
     assert_success
     assert_output --partial "remaining extensions  : 1"
 
-    run ws_allocate --config bats/ws.conf -x extensiontest 10
+    run ws_allocate --yes --config bats/ws.conf -x extensiontest 10
     assert_success
     assert_output --partial "remaining extensions  : 0"
 
-    run ws_allocate --config bats/ws.conf -x extensiontest 15
+    run ws_allocate --yes --config bats/ws.conf -x extensiontest 15
     assert_failure
     assert_output --partial "no more extensions!"
 

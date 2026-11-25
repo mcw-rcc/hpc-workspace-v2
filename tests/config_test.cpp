@@ -660,3 +660,52 @@ workspaces:
     REQUIRE(config.dbuid() == 0);
     REQUIRE(config.dbgid() == 0);
 }
+
+// MCW: extensionthreshold, global default with per-filesystem override
+TEST_CASE("config: extensionthreshold", "[config][mcw]") {
+    const std::string base = R"(
+clustername: aName
+smtphost: localhost
+default: fs1
+duration: 60
+maxextensions: 1
+dbuid: 9999
+dbgid: 9999
+adminmail: [root]
+)";
+    const std::string fss = R"(
+workspaces:
+  fs1:
+    keeptime: 1
+    spaces: [/tmp]
+    database: /tmp
+    deleted: .del
+  fs2:
+    keeptime: 1
+    spaces: [/tmp]
+    database: /tmp
+    deleted: .del
+    extensionthreshold: 50
+)";
+
+    SECTION("default is 0 (upstream behaviour)") {
+        auto config = Config(base + fss);
+        REQUIRE(config.extensionthreshold() == 0);
+        REQUIRE(config.getFsConfig("fs1").extensionthreshold == 0);
+        REQUIRE(config.getFsConfig("fs2").extensionthreshold == 50);
+        REQUIRE(config.validate());
+    }
+    SECTION("global value is inherited, filesystem value wins") {
+        auto config = Config(base + "extensionthreshold: 75\n" + fss);
+        REQUIRE(config.extensionthreshold() == 75);
+        REQUIRE(config.getFsConfig("fs1").extensionthreshold == 75);
+        REQUIRE(config.getFsConfig("fs2").extensionthreshold == 50);
+        REQUIRE(config.validate());
+    }
+    SECTION("out of range is invalid") {
+        auto config = Config(base + "extensionthreshold: 101\n" + fss);
+        REQUIRE_FALSE(config.validate());
+        auto config2 = Config(base + "extensionthreshold: -1\n" + fss);
+        REQUIRE_FALSE(config2.validate());
+    }
+}

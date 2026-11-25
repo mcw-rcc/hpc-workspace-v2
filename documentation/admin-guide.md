@@ -325,6 +325,14 @@ If no email is set, the mail is send to local username.
 Maximum number of times a user can extend a workspace, can be overwritten in
 each workspace location specific section.
 
+#### `extensionthreshold` (MCW)
+
+Percentage (`0`..`100`) of the current period of a workspace that has to be
+elapsed before a user may extend it. The current period runs from the creation
+of the workspace, or from its last extension, until its expiration. Default is
+`0` (no restriction, upstream behaviour). Can be overwritten in each workspace
+location specific section. See the workspace section below for details.
+
 #### `dbuid`
 
 UID of the database directory, and the UID that will be used by all setuid
@@ -539,6 +547,19 @@ This specifies how often a user can extend a workspace, either with
 duration ends later than the current duration (in other words, you can shorten
 the lifetime even if you have no extensions left) and if the user is not root.
 Root can always extend any workspace using ```-u``` option.
+
+#### `extensionthreshold` (MCW)
+
+Percentage (`0`..`100`) of the current period that has to be elapsed before an
+extension is accepted, inherited from the global value if not set. With
+`extensionthreshold: 75`, a 60 day workspace can be extended from day 45 on.
+An earlier request fails with a non-zero exit code, prints the date from which
+the extension is possible, and does not consume an extension.
+
+The period starts at the creation of the workspace, or at the time of the last
+extension, which is stored as `extended` in the DB entry. The rule only applies
+to requests that would consume an extension: changing mail address, reminder or
+comment, or shortening a workspace, is always possible. Root is not restricted.
 
 #### `expirationmail`
 

@@ -31,3 +31,29 @@ comment: ""
         REQUIRE(entry.getMailaddress() == "");
     }
 }
+
+// MCW: time of last extension is kept in the DB entry as "extended"
+TEST_CASE("Database v1 yaml parser: extended field", "[dbv1][mcw]") {
+    SECTION("missing in upstream entries -> 0") {
+        DBEntryV1 entry(nullptr);
+        entry.readFromString(std::string{R"yaml(
+workspace: /a/path
+creation: 1734000000
+expiration: 1734701876
+extensions: 1
+)yaml"});
+        REQUIRE(entry.getLastExtension() == 0);
+        REQUIRE(entry.getCreation() == 1734000000);
+    }
+    SECTION("present") {
+        DBEntryV1 entry(nullptr);
+        entry.readFromString(std::string{R"yaml(
+workspace: /a/path
+creation: 1734000000
+expiration: 1734701876
+extended: 1734500000
+extensions: 0
+)yaml"});
+        REQUIRE(entry.getLastExtension() == 1734500000);
+    }
+}

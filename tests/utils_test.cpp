@@ -1,7 +1,7 @@
 #include <filesystem>
 #define CATCH_CONFIG_MAIN // This tells Catch to provide a main() - only do this in one cpp file
-#include <catch2/catch_test_macros.hpp>
 #include <algorithm>
+#include <catch2/catch_test_macros.hpp>
 #include <climits>
 #include <string>
 #include <vector>
@@ -359,7 +359,9 @@ TEST_CASE("utils::splitString", "[utils]") {
     SECTION("splits on delimiter") {
         REQUIRE(utils::splitString("a,b,c", ',') == std::vector<std::string>{"a", "b", "c"});
     }
-    SECTION("no delimiter is a single token") { REQUIRE(utils::splitString("abc", ',') == std::vector<std::string>{"abc"}); }
+    SECTION("no delimiter is a single token") {
+        REQUIRE(utils::splitString("abc", ',') == std::vector<std::string>{"abc"});
+    }
     SECTION("empty string yields no tokens") { REQUIRE(utils::splitString("", ',').empty()); }
     SECTION("consecutive delimiters yield empty tokens") {
         REQUIRE(utils::splitString("a,,b", ',') == std::vector<std::string>{"a", "", "b"});
@@ -394,7 +396,9 @@ TEST_CASE("utils::getFileContents", "[utils]") {
         REQUIRE(utils::getFileContents((dir / "empty").string()) == "");
     }
 
-    SECTION("missing file throws") { REQUIRE_THROWS_AS(utils::getFileContents((dir / "nothere").string()), std::exception); }
+    SECTION("missing file throws") {
+        REQUIRE_THROWS_AS(utils::getFileContents((dir / "nothere").string()), std::exception);
+    }
 
     fs::remove_all(dir);
 }
@@ -425,7 +429,9 @@ TEST_CASE("utils::dirEntries", "[utils]") {
         REQUIRE(all == std::vector<std::string>{"a.txt", "b.txt", "c.log", "sub"});
     }
 
-    SECTION("nonexistent directory returns empty") { REQUIRE(utils::dirEntries((dir / "gone").string(), "*", true).empty()); }
+    SECTION("nonexistent directory returns empty") {
+        REQUIRE(utils::dirEntries((dir / "gone").string(), "*", true).empty());
+    }
 
     fs::remove_all(dir);
 }
@@ -449,9 +455,7 @@ TEST_CASE("utils::getDBYamlReader", "[utils]") {
     REQUIRE((reader == "yaml-cpp" || reader == "RapidYAML"));
 }
 
-TEST_CASE("utils::SrcPos", "[utils]") {
-    REQUIRE(utils::SrcPos("f.cpp", 42, "foo").getSrcPos() == "f.cpp:42[foo]");
-}
+TEST_CASE("utils::SrcPos", "[utils]") { REQUIRE(utils::SrcPos("f.cpp", 42, "foo").getSrcPos() == "f.cpp:42[foo]"); }
 
 TEST_CASE("utils::getOwner and getID", "[utils]") {
     SECTION("single dash uses the simple split") {
@@ -519,5 +523,34 @@ TEST_CASE("utils::isValidWorkspaceName", "[utils]") {
     SECTION("long names do not crash") {
         REQUIRE(utils::isValidWorkspaceName(std::string(1000000, 'a')));
         REQUIRE_FALSE(utils::isValidWorkspaceName(std::string(1000000, 'a') + "/"));
+    }
+}
+
+// MCW: extension threshold rule
+TEST_CASE("utils::extensionAllowedAt", "[utils][mcw]") {
+    const long day = 24 * 3600;
+    const long start = 1'700'000'000;
+
+    SECTION("threshold 0 means always allowed") {
+        REQUIRE(utils::extensionAllowedAt(start, start + 60 * day, 0) == start);
+        REQUIRE(utils::extensionAllowedAt(start, start + 60 * day, -5) == start);
+    }
+    SECTION("75% of a 60 day period is day 45") {
+        REQUIRE(utils::extensionAllowedAt(start, start + 60 * day, 75) == start + 45 * day);
+    }
+    SECTION("75% of a 10 day period") {
+        REQUIRE(utils::extensionAllowedAt(start, start + 10 * day, 75) == start + 7 * day + 12 * 3600);
+    }
+    SECTION("rounds up, never early") {
+        // 75% of 3 seconds is 2.25 seconds -> 3
+        REQUIRE(utils::extensionAllowedAt(start, start + 3, 75) == start + 3);
+    }
+    SECTION("100% means at expiration, above 100 is capped") {
+        REQUIRE(utils::extensionAllowedAt(start, start + 60 * day, 100) == start + 60 * day);
+        REQUIRE(utils::extensionAllowedAt(start, start + 60 * day, 150) == start + 60 * day);
+    }
+    SECTION("empty or negative period") {
+        REQUIRE(utils::extensionAllowedAt(start, start, 75) == start);
+        REQUIRE(utils::extensionAllowedAt(start, start - day, 75) == start);
     }
 }
