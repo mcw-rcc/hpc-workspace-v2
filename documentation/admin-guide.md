@@ -548,9 +548,6 @@ duration ends later than the current duration (in other words, you can shorten
 the lifetime even if you have no extensions left) and if the user is not root.
 Root can always extend any workspace using ```-u``` option.
 
-A request for a longer duration than allowed is rejected for extensions (MCW),
-it does not consume an extension; new workspaces are still capped to the maximum.
-
 #### `extensionthreshold` (MCW)
 
 Percentage (`0`..`100`) of the current period that has to be elapsed before an

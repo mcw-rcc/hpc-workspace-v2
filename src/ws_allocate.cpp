@@ -8,7 +8,7 @@
  *  c++ version of workspace utility
  *  a workspace is a temporary directory created in behalf of a user with a limited lifetime.
  *
- *  (c) Holger Berger 2021,2023,2024,2025
+ *  (c) Holger Berger 2021,2023,2024,2025,2026
  *  (c) Christoph Niethammer 2025,2026
  *
  *  hpc-workspace-v2 is based on workspace by Holger Berger, Thomas Beisel and Martin Hecht
@@ -70,7 +70,7 @@ template <> struct fmt::formatter<po::options_description> : ostream_formatter {
  */
 void commandline(po::variables_map& opt, string& name, int& duration, string& filesystem, bool& extension,
                  int& reminder, string& mailaddress, string& user, string& groupreadable, string& groupwritable,
-                 string& comment, int argc, char** argv, std::string& userconf, std::string& configfile) {
+                 bool& yes, string& comment, int argc, char** argv, std::string& userconf, std::string& configfile) {
     // define all options
 
     po::options_description cmd_options("\nOptions");
@@ -86,6 +86,7 @@ void commandline(po::variables_map& opt, string& name, int& duration, string& fi
         ("username,u", po::value<string>(&user), "username")
         ("groupreadable,g", po::value<string>(&groupreadable)->implicit_value(""), "for group <arg> readable workspace, current group if none given")
         ("groupwritable,G", po::value<string>(&groupwritable)->implicit_value(""), "for group <arg> writable workspace, current group if none given")
+        ("yes,y", po::bool_switch(&yes), "answer yes to all questions (default: no)")
         ("comment,c", po::value<string>(&comment), "comment")("config", po::value<string>(&configfile), "config file");
     // clang-format on
 
@@ -313,8 +314,8 @@ bool validateDuration(const Config& config, const std::string filesystem, int& d
         }
         if (getuid() != 0 && ((duration > configduration) || (duration < 0))) {
             duration = configduration;
-            spdlog::warn("Duration longer than allowed for this workspace");
-            spdlog::warn("  setting to allowed maximum of {}", duration);
+            spdlog::warn("duration longer than allowed for this workspace");
+            spdlog::warn("setting to allowed maximum of {}", duration);
         }
     }
 
@@ -364,7 +365,7 @@ int countWorkspaces(const Config& config, const std::string username, const std:
  */
 bool allocate(const Config& config, const po::variables_map& opt, int duration, string filesystem, const string name,
               const bool extensionflag, const int reminder, const string mailaddress, string user_option,
-              const string groupreadable, const string groupwritable, const string comment) {
+              const string groupreadable, const string groupwritable, const bool yes, const string comment) {
     if (traceflag)
         spdlog::trace("allocate({}, {}, {}, {}, {}, {}, {}, {},{}, {})", duration, filesystem, name, extensionflag,
                       reminder, mailaddress, user_option, groupreadable, groupwritable, comment);
@@ -535,66 +536,6 @@ bool allocate(const Config& config, const po::variables_map& opt, int duration, 
                     exit(-1); // FIXME: bad for testing
                 }
             }
-            // compute the new expiration first: a request that is rejected below must not change
-            // anything and must not consume an extension
-            if (duration != 0) {
-                int configduration;
-
-                // FIXME: implement userexceptions
-                if ((configduration = config.getFsConfig(foundfs).maxduration) == 0) {
-                    configduration = config.durationdefault();
-                }
-                if (getuid() != 0) {
-                    // MCW: upstream clamps a too long request, prints an error and still consumes the
-                    // extension; we reject it instead, so the user can retry with a valid duration
-                    if (duration > configduration) {
-                        spdlog::error(
-                            "Duration of {} days is longer than allowed for this workspace (maximum {} days).",
-                            duration, configduration);
-                        spdlog::error("workspace was not extended and no extension was used, please retry with "
-                                      "{} days or less.",
-                                      configduration);
-                        exit(-1); // FIXME: bad for testing
-                    }
-                    if (duration < 0) {
-                        duration = configduration;
-                        spdlog::info("no duration given, extending by the allowed maximum of {} days", duration);
-                    }
-                }
-                exp = time(NULL) + duration * 24 * 3600;
-            } else {
-                exp = -1;
-            }
-
-            // MCW: an extension is only allowed once extensionthreshold percent of the current period
-            // (creation or last extension until expiration) has elapsed. Only checked if the request
-            // would really consume an extension (not for root, mail/comment/reminder changes or
-            // shortening), and only if there is an extension left, otherwise "no more extensions!" is
-            // the more helpful error below.
-            {
-                const int threshold = config.getFsConfig(foundfs).extensionthreshold;
-                const long curexpiration = dbentry->getExpiration();
-                const bool consumes = getuid() != 0 && exp != -1 && exp > curexpiration;
-                if (consumes && threshold > 0 && dbentry->getExtension() > 0) {
-                    const long periodstart =
-                        dbentry->getLastExtension() > 0 ? dbentry->getLastExtension() : dbentry->getCreation();
-                    const long allowedat = utils::extensionAllowedAt(periodstart, curexpiration, threshold);
-                    const long now = time(NULL);
-                    if (now < allowedat) {
-                        const long days = (allowedat - now + 24 * 3600 - 1) / (24 * 3600);
-                        spdlog::error("workspace can not be extended yet, {}% of its current duration has to be "
-                                      "elapsed first.",
-                                      threshold);
-                        spdlog::error("you can extend it on or after {} (in {} day{}).", utils::ctime(allowedat), days,
-                                      days == 1 ? "" : "s");
-                        spdlog::error("workspace was not extended and no extension was used.");
-                        syslog(LOG_INFO, "extension of <%s/%s> refused, allowed after %ld", foundfs.c_str(),
-                               dbid.c_str(), allowedat);
-                        exit(-1); // FIXME: bad for testing
-                    }
-                }
-            }
-
             spdlog::info("extending workspace");
             if (may_modify)
                 syslog(LOG_INFO, "extending <%s/%s>", foundfs.c_str(), username.c_str());
@@ -628,6 +569,102 @@ bool allocate(const Config& config, const po::variables_map& opt, int duration, 
             }
             if (comment_eff != "") {
                 spdlog::info("changed comment.");
+            }
+
+            if (duration != 0) {
+                int configduration;
+
+                // FIXME: implement userexceptions
+                // if(userconfig["workspaces"][cfilesystem]["userexceptions"][username]["duration"]) {
+                //    configduration =
+                //    userconfig["workspaces"][cfilesystem]["userexceptions"][username]["duration"].as<int>();
+                //} else {
+                if ((configduration = config.getFsConfig(foundfs).maxduration) == 0) {
+                    configduration = config.durationdefault();
+                }
+                //}
+
+                // exit if no extension available before interaction with user.
+                if (dbentry->getExtension() <= 0) {
+                    spdlog::error("no more extensions!");
+                    exit(-1);
+                }
+
+                // MCW: an extension is only allowed once extensionthreshold percent of the current period
+                // (creation or last extension until expiration) has elapsed. Checked before any prompt, and
+                // only if the request would consume an extension: duration as it will be applied (capped to
+                // the maximum) must end after the current expiration. Root, mail/comment/reminder changes
+                // (duration 0) and shortening are not affected.
+                if (getuid() != 0) {
+                    const int threshold = config.getFsConfig(foundfs).extensionthreshold;
+                    const int effduration = (duration > configduration || duration < 0) ? configduration : duration;
+                    const long curexpiration = dbentry->getExpiration();
+                    const long now = time(NULL);
+                    if (threshold > 0 && now + effduration * 24L * 3600L > curexpiration) {
+                        const long periodstart =
+                            dbentry->getLastExtension() > 0 ? dbentry->getLastExtension() : dbentry->getCreation();
+                        const long allowedat = utils::extensionAllowedAt(periodstart, curexpiration, threshold);
+                        if (now < allowedat) {
+                            const long days = (allowedat - now + 24 * 3600 - 1) / (24 * 3600);
+                            spdlog::error("workspace can not be extended yet, {}% of its current duration has to be "
+                                          "elapsed first.",
+                                          threshold);
+                            spdlog::error("you can extend it on or after {} (in {} day{}).", utils::ctime(allowedat),
+                                          days, days == 1 ? "" : "s");
+                            spdlog::error("workspace was not extended and no extension was used.");
+                            syslog(LOG_INFO, "extension of <%s/%s> refused, allowed after %ld", foundfs.c_str(),
+                                   dbid.c_str(), allowedat);
+                            exit(-1); // FIXME: bad for testing
+                        }
+                    }
+                }
+
+                // prompt user to continue with remaining time if duration is shorter
+                if (getuid() != 0 && duration <= (dbentry->getRemaining() / (3600L * 24L))) {
+                    if ((!yes) && isatty(STDIN_FILENO)) {
+                        spdlog::warn("duration shorter than remaining time ({})",
+                                     (dbentry->getRemaining() / (3600L * 24L)));
+                        fmt::print(stderr,
+                                   "Do you want to continue (consuming an extension) shortening the duration? [y/n]: ");
+                        string answer;
+                        cin >> answer;
+                        if (answer != "y" && answer != "Y") {
+                            spdlog::warn("Aborting, workspace not extended!");
+                            exit(-1);
+                        }
+                    }
+                }
+
+                // validate duration, ask for confirmation if longer than allowed
+                // to give user opportunity to cancel before consuming an extension
+                if (getuid() != 0 && ((duration > configduration) || (duration < 0))) {
+                    // prompt only when we're really attached to a terminal, otherwise
+                    // (pipe, batch job, cron) reading would block or fail
+                    if ((!yes) && isatty(STDIN_FILENO)) {
+                        spdlog::warn("duration longer than allowed for this workspace, {} > {}", duration,
+                                     configduration);
+                        fmt::print(
+                            stderr,
+                            "Do you want to continue (consuming an extension) with the allowed maximum of {}? [y/n]: ",
+                            configduration);
+                        string answer;
+                        cin >> answer;
+                        if (answer != "y" && answer != "Y") {
+                            spdlog::warn("Aborting, workspace not extended!");
+                            exit(-1);
+                        }
+                        duration = configduration;
+                        spdlog::warn("continuing with allowed maximum of {}", duration);
+                    } else {
+                        duration = configduration;
+                        spdlog::warn("duration longer than allowed for this workspace.");
+                        spdlog::warn("setting to allowed maximum of {}", duration);
+                    }
+                }
+
+                exp = time(NULL) + duration * 24L * 3600L;
+            } else {
+                exp = -1;
             }
 
             try {
@@ -754,6 +791,7 @@ int main(int argc, char** argv) {
     string comment;
     string configfile;
     int reminder = 0;
+    bool yes = false;
     po::variables_map opt;
     std::string user_conf;
 
@@ -780,7 +818,7 @@ int main(int argc, char** argv) {
 
     // check commandline, get flags which are used to create ws object or for workspace allocation
     commandline(opt, name, duration, filesystem, extensionflag, reminder, mailaddress, user_option, groupreadable,
-                groupwritable, comment, argc, argv, user_conf, configfile);
+                groupwritable, yes, comment, argc, argv, user_conf, configfile);
 
     // find which config files to read
     //   user can change this if no setuid installation OR if root
@@ -827,7 +865,7 @@ int main(int argc, char** argv) {
 
     // allocate workspace
     if (!allocate(config, opt, duration, filesystem, name, extensionflag, reminder, mailaddress, user_option,
-                  groupreadable, groupwritable, comment)) {
+                  groupreadable, groupwritable, yes, comment)) {
         return -1;
     }
 }
