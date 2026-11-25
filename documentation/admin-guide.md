@@ -671,6 +671,53 @@ enabled if the `--cleaner` (or `-c`) option is specified when calling
 
 **Warning:** anything in a spaces directory can be deleted by the expirer!
 
+## `ws_share` on NFSv4 filesystems (MCW RCC)
+
+Upstream `ws_share` uses POSIX ACLs (`getfacl`/`setfacl`). Those do not work on
+NFSv4 mounts such as Qumulo. On a workspace whose mount type is `nfs4`,
+`ws_share` uses `nfs4_getfacl`/`nfs4_setfacl`/`nfs4_editfacl` from the
+`nfs4-acl-tools` package instead, and writes NFSv4 ACEs that grant the same
+access as the upstream POSIX entries. The permission letters are the ones Qumulo
+itself shows for mode bits (`rwx` = `rwaDxtTnNcy`, `r-x` = `rxtncy`), so a
+shared user gets exactly what the owning group gets with the same mode bits:
+
+| upstream POSIX entries | NFSv4 ACE written |
+|---|---|
+| `user:U:rX` + `default:user:U:rX` on a directory | `A:fd:U:rxtncy` |
+| `user:U:rX` on a file with an x bit | `A::U:rxtncy` |
+| `user:U:rX` on a file without x bits | `A::U:rtncy` |
+| `user:U:rwX` + `default:user:U:rwX` on a directory | `A:fd:U:rwaDxtTnNcy` |
+| `user:U:rwX` on a file with an x bit | `A::U:rwaxtTnNcy` |
+| `user:U:rwX` on a file without x bits | `A::U:rwatTnNcy` |
+| `group:G:...` | the same, with the `g` flag added |
+| `setfacl -x user:U,default:user:U` | remove every ACE for principal `U` |
+| `setfacl -b` | remove every ACE for a named principal |
+
+`U` is the numeric uid/gid when the client does not map NFSv4 ids
+(`nfs4_disable_idmapping=Y`, as on the RCC Qumulo mounts), else `name@domain`.
+New files inherit the directory ACE including `x`, where POSIX would mask `x`
+by the create mode: never less permissive than upstream.
+
+Qumulo shows a file's owner and owning group as numeric ACEs (`A::<uid>`,
+`A:g:<gid>`) rather than `OWNER@`/`GROUP@`. Those are the mode bits, so
+`ws_share` never removes them and `list`/`check` do not report them as shares.
+Because of that, an explicit share with the workspace's own group cannot be
+told apart from the mode bits and `unsharegroup` leaves it in place; use
+`ws_allocate --private` or `chmod` for that.
+
+New ACEs go to the front of the ACL, so a named grant takes precedence over
+deny entries, as a POSIX named entry does. Symbolic links are skipped, as with
+`setfacl -R`.
+
+Settings, as environment variables (the defaults are at the top of `bin/ws_share`):
+
+- `WS_SHARE_ACL_BACKEND`: `auto` (default, `nfs4` on nfs4 mounts, otherwise `posix`), `posix` or `nfs4`
+- `WS_SHARE_NFS4_IDFORMAT`: `auto` (default: numeric unless `nfs4_disable_idmapping` is `N` and a domain is known), `name` or `numeric`
+- `WS_SHARE_NFS4_DOMAIN`: the NFSv4 id-mapping domain (default: `nfsidmap -d`, then `Domain` in `/etc/idmapd.conf`)
+
+Users outside the workspace's group can only reach a shared workspace if they
+can traverse its parent directories (at MCW the lab roots `/scratch/g/<lab>` are `2751` for this).
+
 ## Setting up the ```ws_expirer```
 
 The `ws_expirer` is the tool which takes care of expired Workspaces. To set

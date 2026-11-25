@@ -19,7 +19,13 @@ before the command to grant read-write access instead.
 .B Note:
 UNIX ACL support of the filesystem storing the workspaces is required for
 .B ws_share
-to work.
+to work. On NFSv4 mounts
+.B ws_share
+uses NFSv4 ACLs through
+.BR nfs4_getfacl (1)
+and
+.BR nfs4_setfacl (1)
+instead and grants the same access; see the admin guide.
 
 .B Note:
 Changing file or directory permissions with standard UNIX tools (e.g.
