@@ -130,7 +130,10 @@ nfs4_filter_acl() {
     awk -v drop="$_WS_SHARE_NFS4_DROP" -v keep="${_WS_SHARE_NFS4_KEEP:-}" \
         "$NFS4_AWK_LIB"'
         BEGIN { nfs4_init(drop, keep) }
-        !nfs4_match($0) { print }' "$file" > "$tmp" && cat "$tmp" > "$file"
+        # keep comments and ACEs only: the "## Editing NFSv4 ACL for ...: <path>"
+        # header spills onto extra lines when the path holds a newline
+        /^[ \t]*#/ { print; next }
+        split($0, x, ":") >= 4 && !nfs4_match($0) { print }' "$file" > "$tmp" && cat "$tmp" > "$file"
     rc=$?
     rm -f "$tmp"
     return $rc
