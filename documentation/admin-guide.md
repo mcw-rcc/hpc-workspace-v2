@@ -671,6 +671,43 @@ enabled if the `--cleaner` (or `-c`) option is specified when calling
 
 **Warning:** anything in a spaces directory can be deleted by the expirer!
 
+## `ws_share` on NFSv4 filesystems (MCW RCC)
+
+Upstream `ws_share` uses POSIX ACLs (`getfacl`/`setfacl`). Those do not work on
+NFSv4 mounts such as Qumulo. On a workspace whose mount type is `nfs4`,
+`ws_share` uses `nfs4_getfacl`/`nfs4_setfacl`/`nfs4_editfacl` from the
+`nfs4-acl-tools` package instead, and writes NFSv4 ACEs that grant the same
+access as the upstream POSIX entries:
+
+| upstream POSIX entry | NFSv4 ACE written |
+|---|---|
+| `user:U:rX` on a directory | `A:d:U@DOMAIN:rxtcy` |
+| `default:user:U:rX` on a directory | `A:fi:U@DOMAIN:rtcy` |
+| `user:U:rX` on a file with an x bit | `A::U@DOMAIN:rxtcy` |
+| `user:U:rX` on a file without x bits | `A::U@DOMAIN:rtcy` |
+| `user:U:rwX` on a directory | `A:d:U@DOMAIN:rwaDxtcy` |
+| `default:user:U:rwX` on a directory | `A:fi:U@DOMAIN:rwatcy` |
+| `user:U:rwX` on a file with an x bit | `A::U@DOMAIN:rwaxtcy` |
+| `user:U:rwX` on a file without x bits | `A::U@DOMAIN:rwatcy` |
+| `group:G:...` | the same, with the `g` flag added |
+| `setfacl -x user:U,default:user:U` | remove every ACE for principal `U` |
+| `setfacl -b` | remove every ACE for a named principal |
+
+The letters follow the Linux knfsd POSIX-to-NFSv4 mapping: POSIX `r` is `r`,
+`w` is `wa` (plus `D` on directories), `x` is `x`, and `tcy` is always granted.
+New ACEs go to the front of the ACL, so a named grant takes precedence over
+`GROUP@`/`EVERYONE@` deny entries, as a POSIX named entry does. Symbolic links
+are skipped, as with `setfacl -R`.
+
+Settings, as environment variables (the defaults are at the top of `bin/ws_share`):
+
+- `WS_SHARE_ACL_BACKEND`: `auto` (default, `nfs4` on nfs4 mounts, otherwise `posix`), `posix` or `nfs4`
+- `WS_SHARE_NFS4_IDFORMAT`: `auto` (default, `name@domain` if a domain is known, otherwise numeric), `name` or `numeric`
+- `WS_SHARE_NFS4_DOMAIN`: the NFSv4 id-mapping domain (default: `nfsidmap -d`, then `Domain` in `/etc/idmapd.conf`)
+
+Users outside the workspace's group can only reach a shared workspace if they
+can traverse its parent directories.
+
 ## Setting up the ```ws_expirer```
 
 The `ws_expirer` is the tool which takes care of expired Workspaces. To set
