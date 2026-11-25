@@ -196,16 +196,28 @@ nfs4_drop_list() { # <u|g> name...
     printf '%s' "$out"
 }
 
-# Run the drop filter over the whole workspace tree (no symlinks). Files are
+# Run the drop filter over the workspace tree (no symlinks). Files are
 # batched per owner uid:gid so the filter knows which ACEs are the mode bits.
+# Only files whose ACL actually holds an ACE to drop are rewritten (selected
+# from the "# file:" headers of nfs4_getfacl), so files owned by others that
+# were never shared do not fail with "Operation not permitted". Names with a
+# newline cannot be read back from those headers and are always rewritten.
 nfs4_drop() { # <drop-spec>
-    local self pair rc=0
+    local self pair uid gid rc=0
     self=$(readlink -f "$0")
     while IFS= read -r pair; do
         [[ -z "$pair" ]] && continue
-        find "$WS_PATH" ! -type l -uid "${pair%:*}" -gid "${pair#*:}" \
-            -exec env _WS_SHARE_NFS4_DROP="$1" _WS_SHARE_NFS4_KEEP="${pair%:*} ${pair#*:}" \
-            EDITOR="$self" nfs4_setfacl -e {} + >/dev/null || rc=1
+        uid=${pair%:*} gid=${pair#*:}
+        {
+            find "$WS_PATH" ! -type l -uid "$uid" -gid "$gid" ! -name $'*\n*' \
+                -exec nfs4_getfacl {} + 2>/dev/null |
+                awk -v drop="$1" -v keep="$uid $gid" "$NFS4_AWK_LIB"'
+                    BEGIN { nfs4_init(drop, keep) }
+                    /^# file: / { cur = substr($0, 9); done = 0; next }
+                    !done && cur != "" && nfs4_match($0) { printf "%s%c", cur, 0; done = 1 }'
+            find "$WS_PATH" ! -type l -uid "$uid" -gid "$gid" -name $'*\n*' -print0
+        } | xargs -0 -r env _WS_SHARE_NFS4_DROP="$1" _WS_SHARE_NFS4_KEEP="$uid $gid" \
+            EDITOR="$self" nfs4_setfacl -e >/dev/null || rc=1
     done < <(find "$WS_PATH" ! -type l -printf '%U:%G\n' | sort -u)
     return $rc
 }

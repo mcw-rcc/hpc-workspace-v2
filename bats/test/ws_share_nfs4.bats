@@ -235,3 +235,29 @@ acl() { nfs4_getfacl "$1" | grep -v '^#'; }
     assert_failure
     assert_output --partial "invalid WS_SHARE_ACL_BACKEND"
 }
+
+@test "nfs4 unshare only rewrites files that hold the principal" {
+    ws_share share ws $U
+    # a file created later by someone else, which never got the grant
+    echo x > "$WS/sub/other.txt"; chown daemon "$WS/sub/other.txt"
+    run ws_share unshare ws $U
+    assert_success
+    run grep -c -- "-e .*other.txt" "$NFS4_MOCK_STORE/calls.log"
+    assert_output "0"
+    run grep -c -- "-e .*data.txt" "$NFS4_MOCK_STORE/calls.log"
+    assert_output "1"
+    run acl "$WS/data.txt"
+    refute_output --partial ":$UID_U:"
+}
+
+@test "nfs4 unshare handles file names with newlines" {
+    f="$WS/sub/bad"$'\n'"name"
+    echo x > "$f"
+    ws_share share ws $U
+    run acl "$f"
+    assert_line "A::$UID_U:rtncy"
+    run ws_share unshare ws $U
+    assert_success
+    run acl "$f"
+    refute_output --partial ":$UID_U:"
+}
