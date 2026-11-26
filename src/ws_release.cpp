@@ -31,6 +31,8 @@
 #include "fmt/base.h"
 #include "fmt/ostream.h"
 #include "fmt/ranges.h" // IWYU pragma: keep
+#include <cerrno>
+#include <cstring>
 #include <memory>
 #include <string>
 
@@ -324,11 +326,34 @@ bool release(const Config& config, const po::variables_map& opt, string filesyst
             // to be allowed to delete the toplevel, we need to be DB user
             caps.become_db(utils::SrcPos(__FILE__, __LINE__, __func__));
             // delete toplevel, not recursively, as we are not allowed to delete/look inside
+            bool toplevel_gone = true;
             try {
                 cppfs::remove(src);
             } catch (const std::exception& e) {
-                spdlog::error("remove {} -> {}", src, e.what());
+                toplevel_gone = false;
+                if (debugflag)
+                    spdlog::debug("remove {} -> {}", src, e.what());
             }
+            // MCW: on Qumulo NFS the DB user is refused the rmdir (and a rename) of the emptied
+            // directory even with DELETE_CHILD on the parent; CAP_DAC_OVERRIDE does not reach the
+            // server. MCW mounts have no root squash and ws_expirer deletes as root, so remove the
+            // (empty, user-unwritable parent, so not swappable) directory as root. rmdir only
+            // removes an empty directory and never follows a symlink.
+            if (!toplevel_gone && user::isSetuid()) {
+                if (seteuid(0) == 0) {
+                    if (rmdir(src.c_str()) == 0) {
+                        toplevel_gone = true;
+                    } else {
+                        spdlog::error("could not remove empty directory {}: {}", src, strerror(errno));
+                    }
+                } else {
+                    spdlog::error("could not remove empty directory {}: can not raise to root", src);
+                }
+            } else if (!toplevel_gone) {
+                spdlog::error("could not remove empty directory {}", src);
+            }
+            if (!toplevel_gone)
+                spdlog::info("the empty directory is left for ws_expirer to clean up");
 
             // back to the DB identity (set_identity anchors at root itself)
             caps.lower_cap({CAP_DAC_OVERRIDE}, dbentry->getConfig()->dbuid(),
