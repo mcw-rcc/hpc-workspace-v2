@@ -31,6 +31,8 @@
 #include "fmt/base.h"
 #include "fmt/ostream.h"
 #include "fmt/ranges.h" // IWYU pragma: keep
+#include <cerrno>
+#include <cstring>
 #include <memory>
 #include <string>
 
@@ -332,21 +334,26 @@ bool release(const Config& config, const po::variables_map& opt, string filesyst
                 if (debugflag)
                     spdlog::debug("remove {} -> {}", src, e.what());
             }
-            // MCW: on Qumulo NFS the DB user may not delete a directory it has no ACE on,
-            // even with DELETE_CHILD on the parent (CAP_DAC_OVERRIDE does not reach the server).
-            // A rename into the deleted path is allowed (same as a plain release), so move the
-            // now empty directory there; ws_expirer (root) removes it as a stray.
-            if (!toplevel_gone) {
-                auto wsconfig = dbentry->getConfig()->getFsConfig(dbentry->getFilesystem());
-                cppfs::path target = cppfs::path(src).parent_path() / cppfs::path(wsconfig.deletedPath) /
-                                     cppfs::path(fmt::format("{}-{}", dbentry->getId(), timestamp_time));
-                try {
-                    cppfs::rename(src, target);
-                    spdlog::info("empty workspace directory moved to {} for final cleanup", target.string());
-                } catch (const std::exception& e) {
-                    spdlog::error("could not remove or move empty directory {}: {}", src, e.what());
+            // MCW: on Qumulo NFS the DB user is refused the rmdir (and a rename) of the emptied
+            // directory even with DELETE_CHILD on the parent; CAP_DAC_OVERRIDE does not reach the
+            // server. MCW mounts have no root squash and ws_expirer deletes as root, so remove the
+            // (empty, user-unwritable parent, so not swappable) directory as root. rmdir only
+            // removes an empty directory and never follows a symlink.
+            if (!toplevel_gone && user::isSetuid()) {
+                if (seteuid(0) == 0) {
+                    if (rmdir(src.c_str()) == 0) {
+                        toplevel_gone = true;
+                    } else {
+                        spdlog::error("could not remove empty directory {}: {}", src, strerror(errno));
+                    }
+                } else {
+                    spdlog::error("could not remove empty directory {}: can not raise to root", src);
                 }
+            } else if (!toplevel_gone) {
+                spdlog::error("could not remove empty directory {}", src);
             }
+            if (!toplevel_gone)
+                spdlog::info("the empty directory is left for ws_expirer to clean up");
 
             // back to the DB identity (set_identity anchors at root itself)
             caps.lower_cap({CAP_DAC_OVERRIDE}, dbentry->getConfig()->dbuid(),
