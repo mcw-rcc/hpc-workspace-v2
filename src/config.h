@@ -64,6 +64,8 @@ struct Global_config {
     int maxextensions = 0;     // max extensions a user gets
     // MCW: percent of the current period that must be elapsed before extending, 0 = off
     int extensionthreshold = 0;
+    // MCW: in the last extensionwindow days before expiration extending is always allowed, 0 = off
+    int extensionwindow = 0;
     int maxuserworkspaces = 0; // max number of workspaces a user can create, 0 = no limit
     uid_t dbuid = 0;           // uid of DB user (0 = unset, rejected by validate())
     gid_t dbgid = 0;           // gid of DB user (0 = unset, rejected by validate())
@@ -90,6 +92,8 @@ struct Filesystem_config {
     int maxextensions;     // max extensiones a user can do for this filesystem
     // MCW: percent of the current period that must be elapsed before extending, 0 = off
     int extensionthreshold = 0;
+    // MCW: in the last extensionwindow days before expiration extending is always allowed, 0 = off
+    int extensionwindow = 0;
     bool expirationmail;   // send a mail to the user when their workspace expires
     // migration helpers
     bool allocatable; // is this filesystem allocatable? (or read only?)
@@ -153,6 +157,7 @@ class Config {
     string clustername() const { return global.clustername; };
     int maxextensions() const { return global.maxextensions; };
     int extensionthreshold() const { return global.extensionthreshold; }; // MCW
+    int extensionwindow() const { return global.extensionwindow; };       // MCW
     int maxduration() const { return global.maxduration; };
     string defaultworkspace() const { return global.defaultWorkspace; };
     int deldirtimeout() const { return global.deldirtimeout; };

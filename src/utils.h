@@ -200,8 +200,10 @@ std::string getOwner(const std::string& wsid);
 // MCW: earliest epoch time at which a workspace may be extended, given the start of its
 // current period (creation, or time of the last extension), its expiration and the
 // threshold in percent of the period that has to be elapsed (0 = always allowed).
-// Returns periodstart for threshold <= 0 or an empty/negative period.
-long extensionAllowedAt(const long periodstart, const long expiration, const int thresholdpercent);
+// Returns periodstart for threshold <= 0 or an empty/negative period. With windowdays > 0,
+// the last windowdays days before expiration are always allowed (never before periodstart).
+long extensionAllowedAt(const long periodstart, const long expiration, const int thresholdpercent,
+                        const int windowdays = 0);
 
 } // namespace utils
 

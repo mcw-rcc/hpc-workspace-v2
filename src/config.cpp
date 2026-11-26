@@ -172,10 +172,19 @@ bool Config::validate() {
         spdlog::error("extensionthreshold must be between 0 and 100 (percent)!");
     }
 
+    if (global.extensionwindow < 0) {
+        valid = false;
+        spdlog::error("extensionwindow must not be negative (days)!");
+    }
+
     for (auto const& [fsname, fsdata] : filesystems) {
         if (fsdata.extensionthreshold < 0 || fsdata.extensionthreshold > 100) {
             valid = false;
             spdlog::error("extensionthreshold in filesystem <{}> must be between 0 and 100 (percent)!", fsname);
+        }
+        if (fsdata.extensionwindow < 0) {
+            valid = false;
+            spdlog::error("extensionwindow in filesystem <{}> must not be negative (days)!", fsname);
         }
         if (fsdata.spaces.empty()) {
             valid = false;
@@ -236,6 +245,7 @@ void Config::readYAML(string yamlstr) {
     readRyamlScalar(config, "reminderdefault", global.reminderdefault);
     readRyamlScalar(config, "maxextensions", global.maxextensions);
     readRyamlScalar(config, "extensionthreshold", global.extensionthreshold);
+    readRyamlScalar(config, "extensionwindow", global.extensionwindow);
     readRyamlScalar(config, "dbuid", global.dbuid);
     readRyamlScalar(config, "dbgid", global.dbgid);
     readRyamlScalar(config, "restorenosub", global.restorenosub);
@@ -294,6 +304,10 @@ void Config::readYAML(string yamlstr) {
                         node >> fs.extensionthreshold;
                     else
                         fs.extensionthreshold = global.extensionthreshold;
+                    if (node = ws["extensionwindow"]; node.has_val())
+                        node >> fs.extensionwindow;
+                    else
+                        fs.extensionwindow = global.extensionwindow;
                     if (node = ws["expirationmail"]; node.has_val())
                         node >> fs.expirationmail;
                     if (node = ws["allocatable"]; node.has_val())
@@ -352,6 +366,8 @@ void Config::readYAML(const string yaml) {
         global.maxextensions = config["maxextensions"].as<int>();
     if (config["extensionthreshold"])
         global.extensionthreshold = config["extensionthreshold"].as<int>();
+    if (config["extensionwindow"])
+        global.extensionwindow = config["extensionwindow"].as<int>();
     if (config["dbuid"])
         global.dbuid = config["dbuid"].as<uid_t>();
     if (config["dbgid"])
@@ -432,6 +448,11 @@ void Config::readYAML(const string yaml) {
                         fs.extensionthreshold = ws["extensionthreshold"].as<int>();
                     else
                         fs.extensionthreshold = global.extensionthreshold;
+
+                    if (ws["extensionwindow"])
+                        fs.extensionwindow = ws["extensionwindow"].as<int>();
+                    else
+                        fs.extensionwindow = global.extensionwindow;
 
                     if (ws["expirationmail"])
                         fs.expirationmail = ws["expirationmail"].as<bool>();

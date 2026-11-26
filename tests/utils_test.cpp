@@ -554,3 +554,27 @@ TEST_CASE("utils::extensionAllowedAt", "[utils][mcw]") {
         REQUIRE(utils::extensionAllowedAt(start, start - day, 75) == start);
     }
 }
+
+TEST_CASE("utils::extensionAllowedAt with extensionwindow", "[utils][mcw]") {
+    const long start = 1700000000;
+    const long day = 24 * 3600;
+    SECTION("long period: 75% comes before the window, unchanged") {
+        REQUIRE(utils::extensionAllowedAt(start, start + 60 * day, 75, 7) == start + 45 * day);
+    }
+    SECTION("28 days: both rules meet at day 21") {
+        REQUIRE(utils::extensionAllowedAt(start, start + 28 * day, 75, 7) == start + 21 * day);
+    }
+    SECTION("20 days: window opens at day 13, before 75% (day 15)") {
+        REQUIRE(utils::extensionAllowedAt(start, start + 20 * day, 75, 7) == start + 13 * day);
+    }
+    SECTION("period shorter than the window: allowed at once") {
+        REQUIRE(utils::extensionAllowedAt(start, start + 4 * day, 75, 7) == start);
+    }
+    SECTION("window 0 or negative is off") {
+        REQUIRE(utils::extensionAllowedAt(start, start + 4 * day, 75, 0) == start + 3 * day);
+        REQUIRE(utils::extensionAllowedAt(start, start + 4 * day, 75, -1) == start + 3 * day);
+    }
+    SECTION("threshold 0 stays always allowed") {
+        REQUIRE(utils::extensionAllowedAt(start, start + 60 * day, 0, 7) == start);
+    }
+}
