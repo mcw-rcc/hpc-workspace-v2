@@ -324,10 +324,28 @@ bool release(const Config& config, const po::variables_map& opt, string filesyst
             // to be allowed to delete the toplevel, we need to be DB user
             caps.become_db(utils::SrcPos(__FILE__, __LINE__, __func__));
             // delete toplevel, not recursively, as we are not allowed to delete/look inside
+            bool toplevel_gone = true;
             try {
                 cppfs::remove(src);
             } catch (const std::exception& e) {
-                spdlog::error("remove {} -> {}", src, e.what());
+                toplevel_gone = false;
+                if (debugflag)
+                    spdlog::debug("remove {} -> {}", src, e.what());
+            }
+            // MCW: on Qumulo NFS the DB user may not delete a directory it has no ACE on,
+            // even with DELETE_CHILD on the parent (CAP_DAC_OVERRIDE does not reach the server).
+            // A rename into the deleted path is allowed (same as a plain release), so move the
+            // now empty directory there; ws_expirer (root) removes it as a stray.
+            if (!toplevel_gone) {
+                auto wsconfig = dbentry->getConfig()->getFsConfig(dbentry->getFilesystem());
+                cppfs::path target = cppfs::path(src).parent_path() / cppfs::path(wsconfig.deletedPath) /
+                                     cppfs::path(fmt::format("{}-{}", dbentry->getId(), timestamp_time));
+                try {
+                    cppfs::rename(src, target);
+                    spdlog::info("empty workspace directory moved to {} for final cleanup", target.string());
+                } catch (const std::exception& e) {
+                    spdlog::error("could not remove or move empty directory {}: {}", src, e.what());
+                }
             }
 
             // back to the DB identity (set_identity anchors at root itself)
