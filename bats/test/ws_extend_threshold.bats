@@ -137,3 +137,32 @@ backdate() {
     run ws_validate_config --config "$conf"
     assert_output --partial "extensionthreshold must be between 0 and 100"
 }
+
+# MCW: extensionwindow - in the last N days before expiration an extension is always
+# allowed, so short workspaces are not stuck until 75% of a tiny period has passed.
+window_conf() {
+    sed 's/^extensionthreshold: 75$/extensionthreshold: 75\nextensionwindow: 7/' "$conf" > "$conf.win"
+}
+
+@test "ws_extend_threshold: extensionwindow allows a short workspace at once" {
+    window_conf
+    rm -f "$(dbfile THR_WIN)"
+    ws_allocate --config "$conf.win" THR_WIN 4 2>/dev/null
+    run ws_allocate --config "$conf.win" -x THR_WIN 20
+    assert_success
+    run grep "^extensions: 1" "$(dbfile THR_WIN)"
+    assert_success
+    rm -f "$(dbfile THR_WIN)" "$conf.win"
+}
+
+@test "ws_extend_threshold: extensionwindow does not change a long workspace" {
+    window_conf
+    rm -f "$(dbfile THR_WINLONG)"
+    ws_allocate --config "$conf.win" THR_WINLONG 30 2>/dev/null
+    backdate THR_WINLONG 10 20
+    run ws_allocate --config "$conf.win" -x THR_WINLONG 30
+    assert_failure
+    assert_output --partial "or less than 7 days must remain"
+    assert_output --partial "no extension was used"
+    rm -f "$(dbfile THR_WINLONG)" "$conf.win"
+}

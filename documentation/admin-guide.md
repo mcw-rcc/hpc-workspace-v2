@@ -333,6 +333,12 @@ of the workspace, or from its last extension, until its expiration. Default is
 `0` (no restriction, upstream behaviour). Can be overwritten in each workspace
 location specific section. See the workspace section below for details.
 
+#### `extensionwindow` (MCW)
+
+Number of days before expiration in which an extension is always allowed, even if
+`extensionthreshold` percent of the period has not elapsed yet. Default is `0`
+(off). Can be overwritten in each workspace location specific section.
+
 #### `dbuid`
 
 UID of the database directory, and the UID that will be used by all setuid
@@ -560,6 +566,17 @@ The period starts at the creation of the workspace, or at the time of the last
 extension, which is stored as `extended` in the DB entry. The rule only applies
 to requests that would consume an extension: changing mail address, reminder or
 comment, or shortening a workspace, is always possible. Root is not restricted.
+
+#### `extensionwindow` (MCW)
+
+Days before expiration in which an extension is always accepted, inherited from
+the global value if not set. An extension is allowed as soon as either
+`extensionthreshold` percent of the period has elapsed or at most
+`extensionwindow` days remain, whichever comes first. With `extensionthreshold: 75`
+and `extensionwindow: 7`, a 60 day workspace can still be extended from day 45 on,
+a 20 day workspace from day 13 on, and a workspace of 7 days or less right away.
+This keeps short workspaces from being stuck until their last hours, without
+giving more total time than extending at the 75% point would.
 
 #### `expirationmail`
 

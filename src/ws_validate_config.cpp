@@ -200,6 +200,7 @@ int main(int argc, char** argv) {
     fmt::println("maxextensions: {}", maxextensions);
     // MCW
     fmt::println("extensionthreshold: {}", config.extensionthreshold());
+    fmt::println("extensionwindow: {}", config.extensionwindow());
 
     auto dbuid = config.dbuid();
     fmt::println("dbuid: {}", dbuid);
@@ -406,6 +407,7 @@ int main(int argc, char** argv) {
         auto maxextensions = ws.maxextensions;
         fmt::println("    maxextensions: {}", maxextensions);
         fmt::println("    extensionthreshold: {}", ws.extensionthreshold); // MCW
+        fmt::println("    extensionwindow: {}", ws.extensionwindow);       // MCW
 
         auto allocatable = ws.allocatable;
         fmt::println("    allocatable: {}", allocatable);

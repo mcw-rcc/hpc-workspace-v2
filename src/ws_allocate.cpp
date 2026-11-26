@@ -597,18 +597,25 @@ bool allocate(const Config& config, const po::variables_map& opt, int duration, 
                 // (duration 0) and shortening are not affected.
                 if (getuid() != 0) {
                     const int threshold = config.getFsConfig(foundfs).extensionthreshold;
+                    const int window = config.getFsConfig(foundfs).extensionwindow;
                     const int effduration = (duration > configduration || duration < 0) ? configduration : duration;
                     const long curexpiration = dbentry->getExpiration();
                     const long now = time(NULL);
                     if (threshold > 0 && now + effduration * 24L * 3600L > curexpiration) {
                         const long periodstart =
                             dbentry->getLastExtension() > 0 ? dbentry->getLastExtension() : dbentry->getCreation();
-                        const long allowedat = utils::extensionAllowedAt(periodstart, curexpiration, threshold);
+                        const long allowedat = utils::extensionAllowedAt(periodstart, curexpiration, threshold, window);
                         if (now < allowedat) {
                             const long days = (allowedat - now + 24 * 3600 - 1) / (24 * 3600);
-                            spdlog::error("workspace can not be extended yet, {}% of its current duration has to be "
-                                          "elapsed first.",
-                                          threshold);
+                            if (window > 0) {
+                                spdlog::error("workspace can not be extended yet, {}% of its current duration has to be "
+                                              "elapsed first, or less than {} day{} must remain.",
+                                              threshold, window, window == 1 ? "" : "s");
+                            } else {
+                                spdlog::error("workspace can not be extended yet, {}% of its current duration has to "
+                                              "be elapsed first.",
+                                              threshold);
+                            }
                             spdlog::error("you can extend it on or after {} (in {} day{}).", utils::ctime(allowedat),
                                           days, days == 1 ? "" : "s");
                             spdlog::error("workspace was not extended and no extension was used.");

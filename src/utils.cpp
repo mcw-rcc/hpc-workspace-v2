@@ -872,7 +872,8 @@ long long getFileTimeAsLong(const fs::path& p) {
 
 // MCW: earliest time an extension is allowed, see utils.h
 //  unittest: yes
-long extensionAllowedAt(const long periodstart, const long expiration, const int thresholdpercent) {
+long extensionAllowedAt(const long periodstart, const long expiration, const int thresholdpercent,
+                        const int windowdays) {
     if (thresholdpercent <= 0 || expiration <= periodstart) {
         return periodstart;
     }
@@ -880,7 +881,16 @@ long extensionAllowedAt(const long periodstart, const long expiration, const int
     const long long period = static_cast<long long>(expiration) - periodstart;
     // round up, so "75% elapsed" is never reached one second early
     const long long needed = (period * pct + 99) / 100;
-    return static_cast<long>(periodstart + needed);
+    long long allowed = periodstart + needed;
+    // in the last windowdays days before expiration an extension is always allowed,
+    // so short workspaces can be extended well before the last moment
+    if (windowdays > 0) {
+        const long long windowstart = static_cast<long long>(expiration) - static_cast<long long>(windowdays) * 86400LL;
+        if (windowstart < allowed) {
+            allowed = windowstart > periodstart ? windowstart : periodstart;
+        }
+    }
+    return static_cast<long>(allowed);
 }
 
 } // end of namespace utils
