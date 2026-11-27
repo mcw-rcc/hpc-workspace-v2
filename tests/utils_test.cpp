@@ -12,6 +12,7 @@
 #include "../src/mail.h"
 #include "../src/utils.h"
 #include "../src/ws.h"
+#include <sys/stat.h>
 
 namespace fs = std::filesystem;
 
@@ -69,6 +70,42 @@ TEST_CASE("utils", "[utils]") {
         utils::writeFile("/tmp/_wsTT/a/a/a/file3", "file3");
         REQUIRE(utils::rmtree("/tmp/_wsTT") == 3);
         REQUIRE(fs::exists("/tmp/_wsTT") == false);
+    }
+
+    SECTION("same_directory ignores timestamps (NFS attribute cache)") {
+        auto dir = fs::temp_directory_path() / "_wsSD";
+        fs::remove_all(dir);
+        fs::create_directories(dir / "a");
+        fs::create_directories(dir / "b");
+        fs::create_symlink("a", dir / "link");
+        struct stat a, a2, b, l;
+        REQUIRE(lstat((dir / "a").c_str(), &a) == 0);
+        REQUIRE(lstat((dir / "b").c_str(), &b) == 0);
+        REQUIRE(lstat((dir / "link").c_str(), &l) == 0);
+        a2 = a;
+        a2.st_atim.tv_sec -= 10; // what a cached READDIRPLUS stat on Qumulo looks like
+        a2.st_size += 512;
+        a2.st_nlink += 1;
+        REQUIRE(utils::same_directory(a2, a));
+        REQUIRE_FALSE(utils::same_directory(a, b));
+        REQUIRE_FALSE(utils::same_directory(l, a)); // swapped for a symlink
+        fs::remove_all(dir);
+    }
+
+    SECTION("rmtree does not follow symlinks") {
+        auto dir = fs::temp_directory_path() / "_wsRS";
+        auto outside = fs::temp_directory_path() / "_wsRS_outside";
+        fs::remove_all(dir);
+        fs::remove_all(outside);
+        fs::create_directories(dir / "sub");
+        fs::create_directories(outside);
+        utils::writeFile((outside / "keep").string(), "keep");
+        fs::create_directory_symlink(outside, dir / "link");
+        fs::create_directory_symlink(outside, dir / "sub" / "link2");
+        utils::rmtree(dir.string());
+        REQUIRE_FALSE(fs::exists(dir));
+        REQUIRE(fs::exists(outside / "keep"));
+        fs::remove_all(outside);
     }
 
     SECTION("readFileNoFollow") {

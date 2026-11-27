@@ -847,3 +847,14 @@ ws_editdb -e -u alice --add-time-expired 30 --not-kidding
 Contributions are highly welcome. Please refer to the
 [issue tracker](https://github.com/holgerBerger/hpc-workspace-v2/issues) of this project and
 [discussions](https://github.com/holgerBerger/hpc-workspace-v2/discussions)
+
+## Deleting data on NFS (MCW RCC)
+
+`ws_release --delete-data`, `ws_restore --delete-data` and `ws_expirer` delete trees with
+`rmtree`. Before entering a subdirectory it checks that the directory it opened is the one it
+looked at, so a directory swapped for a symlink is never followed. Upstream compares the whole
+`struct stat` for this. On Qumulo NFS the stat taken by name right after `readdir` can come from
+the client's cached attributes, while the stat of the opened directory is fresh from the server,
+so timestamps differ and every subdirectory looked like a symlink ("rmtree hit a symbolic link!")
+and was left behind. The MCW version compares only device, inode and type, and opens with
+`O_NOFOLLOW | O_DIRECTORY`, which keeps the symlink protection.

@@ -609,6 +609,19 @@ auto parseACL(const std::vector<std::string> acl)
     return entries;
 }
 
+// MCW: is the directory we opened the same one we stat'ed by name before opening it?
+// This guards against a directory being swapped for a symlink (or another directory)
+// between the two calls, so it compares only what identifies the object: device, inode
+// and file type. Comparing the whole struct stat (as upstream does) also compares
+// timestamps, sizes and link counts. On NFS (Qumulo) the stat by name right after readdir
+// can come from cached READDIRPLUS attributes while the stat of the opened fd is a fresh
+// GETATTR, so they differ (e.g. atime). That made rmtree report "rmtree hit a symbolic
+// link!" for ordinary subdirectories and leave them behind.
+bool same_directory(const struct stat& before, const struct stat& opened) {
+    return before.st_dev == opened.st_dev && before.st_ino == opened.st_ino && S_ISDIR(before.st_mode) &&
+           S_ISDIR(opened.st_mode);
+}
+
 // delete path be deleting contents and deleting path itself
 // returns the number of files deleted
 std::size_t rmtree(std::string path, std::time_t deadline) {
@@ -627,13 +640,13 @@ std::size_t rmtree(std::string path, std::time_t deadline) {
     }
 
     if (S_ISDIR(orig_stat.st_mode)) {
-        int dirfd = openat(AT_FDCWD, path.c_str(), O_RDONLY | O_CLOEXEC);
+        int dirfd = openat(AT_FDCWD, path.c_str(), O_RDONLY | O_CLOEXEC | O_DIRECTORY | O_NOFOLLOW);
         if (dirfd == -1) {
             spdlog::error("openat {} -> {}", path, errno);
             return 0;
         }
         r = fstatat(dirfd, "", &new_stat, AT_EMPTY_PATH);
-        if (r == 0 && memcmp(&new_stat, &orig_stat, sizeof(struct stat)) == 0) {
+        if (r == 0 && same_directory(orig_stat, new_stat)) {
             // rmtree_fd() takes ownership of dirfd and closes it
             deleted = rmtree_fd(dirfd, path, deadline);
 
@@ -642,6 +655,7 @@ std::size_t rmtree(std::string path, std::time_t deadline) {
                 spdlog::error("unlinkat {} -> {}", path, strerror(errno));
             }
         } else {
+            spdlog::error("{} changed while being deleted (symlink?), not deleted", path);
             close(dirfd);
         }
     }
@@ -674,16 +688,17 @@ std::size_t rmtree_below(std::string path) {
     }
 
     if (S_ISDIR(orig_stat.st_mode)) {
-        int dirfd = openat(AT_FDCWD, path.c_str(), O_RDONLY | O_CLOEXEC);
+        int dirfd = openat(AT_FDCWD, path.c_str(), O_RDONLY | O_CLOEXEC | O_DIRECTORY | O_NOFOLLOW);
         if (dirfd == -1) {
             spdlog::error("openat {} -> {}", path, errno);
             return 0;
         }
         r = fstatat(dirfd, "", &new_stat, AT_EMPTY_PATH);
-        if (r == 0 && memcmp(&new_stat, &orig_stat, sizeof(struct stat)) == 0) {
+        if (r == 0 && same_directory(orig_stat, new_stat)) {
             // rmtree_fd() takes ownership of dirfd and closes it
             deleted = rmtree_fd(dirfd, path, deadline);
         } else {
+            spdlog::error("{} changed while being deleted (symlink?), not deleted", path);
             close(dirfd);
         }
     }
@@ -967,13 +982,13 @@ static std::size_t rmtree_fd(int topfd, std::string path, const std::time_t dead
                 }
 
                 if (S_ISDIR(orig_stat.st_mode)) {
-                    int dirfd = openat(topfd, name, O_RDONLY | O_CLOEXEC);
+                    int dirfd = openat(topfd, name, O_RDONLY | O_CLOEXEC | O_DIRECTORY | O_NOFOLLOW);
                     if (dirfd == -1) {
                         spdlog::error("openat {}/{} -> {}", path, name, errno);
                         continue;
                     }
                     r = fstatat(dirfd, "", &new_stat, AT_EMPTY_PATH);
-                    if (r == 0 && memcmp(&new_stat, &orig_stat, sizeof(struct stat)) == 0) {
+                    if (r == 0 && utils::same_directory(orig_stat, new_stat)) {
                         deleted += rmtree_fd(dirfd, fs::path(path) / name, deadline);
 
                         r = unlinkat(topfd, name, AT_REMOVEDIR);
@@ -981,7 +996,7 @@ static std::size_t rmtree_fd(int topfd, std::string path, const std::time_t dead
                             spdlog::error("unlinkat {}/{} -> {}", path, name, strerror(errno));
                         }
                     } else {
-                        spdlog::error("rmtree hit a symbolic link!");
+                        spdlog::error("rmtree: {}/{} changed while being deleted (symlink?), skipped", path, name);
                         close(dirfd);
                     }
                 }
