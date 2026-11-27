@@ -178,6 +178,12 @@ int main(int argc, char** argv) {
         fmt::println("adminmail_from: {}", adminmail_from);
     }
 
+    // MCW: user -> mail map used by ws_expirer for users who gave no address
+    auto usermailmap = config.usermailmap();
+    if (usermailmap != "") {
+        fmt::println("usermailmap: {}", usermailmap);
+    }
+
     // default/default_workspace
     std::string defaultws = config.defaultworkspace();
     if (defaultws != "") {

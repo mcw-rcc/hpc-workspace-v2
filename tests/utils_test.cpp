@@ -578,3 +578,34 @@ TEST_CASE("utils::extensionAllowedAt with extensionwindow", "[utils][mcw]") {
         REQUIRE(utils::extensionAllowedAt(start, start + 60 * day, 0, 7) == start);
     }
 }
+
+TEST_CASE("mail::parseUserMailMap", "[mail][mcw]") {
+    auto m = mail::parseUserMailMap("# uid mail\n"
+                                    "ad16624 atelega@mcw.edu\n"
+                                    "bgizelar\tbgizelar@mcw.edu  # trailing comment\r\n"
+                                    "\n"
+                                    "nomail\n"
+                                    "bare notanaddress\n"
+                                    "evil a@b.edu,c@d.edu\n"
+                                    "hdr <x@y.edu>\n"
+                                    "two a@b@c\n"
+                                    "last last@mcw.edu");
+    REQUIRE(m.size() == 3);
+    REQUIRE(m.at("ad16624") == "atelega@mcw.edu");
+    REQUIRE(m.at("bgizelar") == "bgizelar@mcw.edu");
+    REQUIRE(m.at("last") == "last@mcw.edu");
+    REQUIRE(mail::parseUserMailMap("").empty());
+}
+
+TEST_CASE("mail::resolveRecipient", "[mail][mcw]") {
+    mail::UserMailMap m{{"ad16624", "atelega@mcw.edu"}};
+    // ws_allocate stored the bare username: use LDAP mail
+    REQUIRE(mail::resolveRecipient("ad16624", "ad16624", m) == "atelega@mcw.edu");
+    REQUIRE(mail::resolveRecipient("", "ad16624", m) == "atelega@mcw.edu");
+    REQUIRE(mail::resolveRecipient("ad16624", "", m) == "atelega@mcw.edu");
+    // an address the user typed (-m or ~/.ws_user.conf) wins
+    REQUIRE(mail::resolveRecipient("adam.t@gmail.com", "ad16624", m) == "adam.t@gmail.com");
+    // not in the map: unchanged
+    REQUIRE(mail::resolveRecipient("zz99999", "zz99999", m) == "zz99999");
+    REQUIRE(mail::resolveRecipient("zz99999", "zz99999", {}) == "zz99999");
+}

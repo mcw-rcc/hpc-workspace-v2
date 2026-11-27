@@ -110,3 +110,54 @@ std::string generateToHeader(std::vector<std::string> mail_to) {
 }
 
 } // namespace mail
+
+namespace mail {
+
+// MCW: parse the nightly "user address" map; bad lines are skipped
+UserMailMap parseUserMailMap(const std::string& content) {
+    UserMailMap map;
+    size_t pos = 0;
+    while (pos <= content.size()) {
+        size_t end = content.find('\n', pos);
+        if (end == std::string::npos)
+            end = content.size();
+        std::string line = content.substr(pos, end - pos);
+        pos = end + 1;
+        auto hash = line.find('#');
+        if (hash != std::string::npos)
+            line.erase(hash);
+        const char* ws = " \t\r";
+        auto b = line.find_first_not_of(ws);
+        if (b == std::string::npos)
+            continue;
+        auto e = line.find_first_of(ws, b);
+        if (e == std::string::npos)
+            continue;
+        auto b2 = line.find_first_not_of(ws, e);
+        if (b2 == std::string::npos)
+            continue;
+        auto e2 = line.find_first_of(ws, b2);
+        std::string user = line.substr(b, e - b);
+        std::string addr = line.substr(b2, e2 == std::string::npos ? std::string::npos : e2 - b2);
+        // plain addr-spec only: one '@', text on both sides, no header/list characters
+        auto at = addr.find('@');
+        if (at == std::string::npos || at == 0 || at + 1 >= addr.size() ||
+            addr.find('@', at + 1) != std::string::npos || addr.find_first_of("<>,;:\"()[]\\") != std::string::npos)
+            continue;
+        map[user] = addr;
+    }
+    return map;
+}
+
+// MCW: see mail.h
+std::string resolveRecipient(const std::string& stored, const std::string& owner, const UserMailMap& map) {
+    if (stored.find('@') != std::string::npos)
+        return stored;
+    if (auto it = map.find(owner); !owner.empty() && it != map.end())
+        return it->second;
+    if (auto it = map.find(stored); !stored.empty() && it != map.end())
+        return it->second;
+    return stored;
+}
+
+} // namespace mail

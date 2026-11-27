@@ -72,6 +72,7 @@ struct Global_config {
     gid_t dbgid = 0;           // gid of DB user (0 = unset, rejected by validate())
     int deldirtimeout = 300;   // timeout for directory deletion in seconds
     string expirerlogpath;     // path where ws_expirer should place logfiles
+    string usermailmap;        // MCW: "user address" file; ws_expirer mails users here when no address was given
     bool restorenosub = false; // if true, restore will not create subdirectories for workspaces
 };
 
@@ -169,6 +170,7 @@ class Config {
     vector<string> admins() const { return global.admins; };
     vector<string> adminmail() const { return global.adminmail; };
     string expirerlogpath() const { return global.expirerlogpath; };
+    string usermailmap() const { return global.usermailmap; }; // MCW
     int maxuserworkspaces() const { return global.maxuserworkspaces; };
     bool restorenosub() const { return global.restorenosub; };
 

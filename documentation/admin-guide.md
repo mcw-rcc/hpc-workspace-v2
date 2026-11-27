@@ -305,6 +305,19 @@ the summary mail), of the form ```user@domain```. If not set, `mail_from` is use
 This lets user mails come from a helpdesk address while admin alerts come from
 an admin address.
 
+#### `usermailmap` (MCW)
+
+Optional path to a file of `user address` lines (`#` starts a comment), for example
+`ad16624 atelega@mcw.edu`. When a user asks for a reminder without giving an address
+(no `-m` and no `mail:` in `~/.ws_user.conf`), `ws_allocate` stores just the username.
+`ws_expirer` then looks the owner up in this file and sends reminder and expiration
+mails to that address. An address the user gave is always used as given. If the user
+is not in the file, the stored value is used and an error is logged.
+
+The file is read by `ws_expirer` as root, so it must be a regular file owned by root
+that is not group or world writable (otherwise it is ignored). At MCW it is written
+nightly from the LDAP `mail` attribute by `ws_labs.py` (hpc-workspace-tools).
+
 #### `default` (alias: `default_workspace`)
 
 Important mandatory option, this determines which workspace location to use if not

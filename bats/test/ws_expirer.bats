@@ -557,3 +557,26 @@ setup() {
     rm -f /tmp/ws/ws1-db/.removed/${id}-*
     rm -rf /tmp/ws/ws1/.removed/${id}-*
 }
+
+# MCW: reminders go to the LDAP mail from usermailmap when the user gave no address
+@test "ws_expirer reminder uses usermailmap when no address was given" {
+    [ -f ~/.ws_user.conf ] && mv ~/.ws_user.conf ~/.ws_user.conf.bats-save
+    printf '# uid mail\n%s mapped.address@localhost\n' "$USER" > /tmp/ws/user_mail.map
+    chmod 600 /tmp/ws/user_mail.map
+    { cat bats/ws.conf; echo "usermailmap: /tmp/ws/user_mail.map"; } > /tmp/ws/ws_usermail.conf
+    ws_allocate --config /tmp/ws/ws_usermail.conf -r 2 MAP_REMIND 2
+    ws_allocate --config /tmp/ws/ws_usermail.conf -m typed@localhost -r 2 MAP_TYPED 2
+    ws_editdb --config /tmp/ws/ws_usermail.conf --not-kidding --add-time -1 'MAP_*'
+    run ws_expirer --config /tmp/ws/ws_usermail.conf -c
+    assert_output --regexp "sending reminder mail to \[\"?mapped.address@localhost\"?\] for entry .*MAP_REMIND"
+    assert_output --regexp "sending reminder mail to \[\"?typed@localhost\"?\] for entry .*MAP_TYPED"
+    chmod 666 /tmp/ws/user_mail.map
+    run ws_expirer --config /tmp/ws/ws_usermail.conf
+    assert_output --partial "must be owned by root and not group/world writable"
+    assert_output --regexp "would send reminder mail to $USER for entry .*MAP_REMIND"
+    ws_release --config /tmp/ws/ws_usermail.conf MAP_REMIND
+    ws_release --config /tmp/ws/ws_usermail.conf MAP_TYPED
+    rm -f /tmp/ws/user_mail.map /tmp/ws/ws_usermail.conf
+    [ -f ~/.ws_user.conf.bats-save ] && mv ~/.ws_user.conf.bats-save ~/.ws_user.conf
+    true
+}

@@ -253,6 +253,7 @@ void Config::readYAML(string yamlstr) {
 
     readRyamlSequence(config, "deldirtimeout", global.deldirtimeout);
     readRyamlSequence(config, "expirerlogpath", global.expirerlogpath);
+    readRyamlScalar(config, "usermailmap", global.usermailmap); // MCW
     readRyamlSequence(config, "maxuserworkspaces", global.maxuserworkspaces);
 
     readRyamlSequence(config, "admins", global.admins);
@@ -387,6 +388,8 @@ void Config::readYAML(const string yaml) {
         global.deldirtimeout = config["deldir_timeout"].as<int>();
     if (config["expirerlogpath"])
         global.expirerlogpath = config["expirerlogpath"].as<string>();
+    if (config["usermailmap"]) // MCW
+        global.usermailmap = config["usermailmap"].as<string>();
     if (config["maxuserworkspaces"])
         global.maxuserworkspaces = config["maxuserworkspaces"].as<int>();
     if (config["restorenosub"])
