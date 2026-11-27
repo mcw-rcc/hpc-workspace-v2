@@ -294,8 +294,12 @@ void restore(const string name, const string target, const string username, cons
         string wssourcename = cppfs::path(wsdir).parent_path().string() + "/" +
                               config.getFsConfig(source_filesystem).deletedPath + "/" + name;
 
-        spdlog::info("deleting files as --delete-data was given");
-        spdlog::info("you have 5 seconds to interrupt with CTRL-C to prevent deletion");
+        // MCW: plain wording for users (dashboard shows these lines too)
+        spdlog::info("--delete-data was given: {} and all its data will be deleted for good", name);
+        // MCW: only offer CTRL-C on a terminal; the dashboard runs us without one and its
+        // user already confirmed, so the line would only confuse them there
+        if (isatty(STDIN_FILENO))
+            spdlog::info("you have 5 seconds to press CTRL-C to stop this");
         sleep(5);
 
         // CAP_FOWNER: unlinking entries we do not own below the workspace, CAP_DAC_*: the deleted
@@ -334,7 +338,7 @@ void restore(const string name, const string target, const string username, cons
         caps.become_db(utils::SrcPos(__FILE__, __LINE__, __func__));
 
         if (!data_gone) {
-            spdlog::error("data of workspace {} could not be completely deleted, database entry kept!", name);
+            spdlog::error("some files of {} could not be deleted; it is still listed so you can try again", name);
             syslog(LOG_ERR, "delete for user <%s> of <%s> incomplete, database entry <%s> kept", username.c_str(),
                    wssourcename.c_str(), name.c_str());
             exit(1);
@@ -345,7 +349,7 @@ void restore(const string name, const string target, const string username, cons
             source_db->deleteEntry(name, true);
             syslog(LOG_INFO, "delete for user <%s> from <%s> done, removed DB entry <%s>.", username.c_str(),
                    wssourcename.c_str(), name.c_str());
-            spdlog::info("delete successful, database entry removed.");
+            spdlog::info("{} and all its data have been deleted. It cannot be restored.", name);
         } catch (DatabaseException const& ex) {
             spdlog::error("error in DB entry removal, {}", ex.what());
             syslog(LOG_ERR, "delete for user <%s> of <%s>: data gone but DB entry removal failed: %s", username.c_str(),

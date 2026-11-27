@@ -276,8 +276,12 @@ bool release(const Config& config, const po::variables_map& opt, string filesyst
         time_t timestamp_time = time(NULL);
 
         if (deletedata) {
-            spdlog::info("deleting workspace as --delete-data was given");
-            spdlog::info("you have 5 seconds to interrupt with CTRL-C to prevent deletion");
+            // MCW: plain wording for users (dashboard shows these lines too)
+            spdlog::info("--delete-data was given: workspace {} and all its data will be deleted for good", name);
+            // MCW: only offer CTRL-C on a terminal; the dashboard runs us without one and its
+            // user already confirmed, so the line would only confuse them there
+            if (isatty(STDIN_FILENO))
+                spdlog::info("you have 5 seconds to press CTRL-C to stop this");
             sleep(5);
         }
 
@@ -363,11 +367,11 @@ bool release(const Config& config, const po::variables_map& opt, string filesyst
             dbentry->remove();
 
             if (toplevel_gone) {
-                spdlog::info("workspace {} and data deleted, can not be restored.", name);
+                spdlog::info("workspace {} has been released and all its data deleted. It cannot be restored.", name);
             } else {
                 // MCW: do not claim the data is gone when part of it is still there
-                spdlog::info("workspace {} released, can not be restored; some data could not be deleted and is "
-                             "left in {} for ws_expirer to clean up.",
+                spdlog::info("workspace {} has been released and cannot be restored, but some of its data could not "
+                             "be deleted. They are left in {} and will be removed by the nightly cleanup.",
                              name, src);
             }
 
@@ -421,10 +425,9 @@ bool release(const Config& config, const po::variables_map& opt, string filesyst
             spdlog::info("workspace {} released.", name);
         }
 
+        // MCW: one clear closing line per case; the delete-data case already said it can not be undone
         if (!deletedata) {
-            spdlog::info("workspace is still recoverable as --delete-data was not given.");
-        } else {
-            spdlog::info("workspace is not recoverable as --delete-data was given.");
+            spdlog::info("its files are kept for a while and it can still be restored, see ws_restore -l");
         }
 
         // if ws_exist
