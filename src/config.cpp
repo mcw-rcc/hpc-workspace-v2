@@ -237,7 +237,7 @@ void Config::readYAML(string yamlstr) {
     readRyamlScalar(config, "clustername", global.clustername);
     readRyamlScalar(config, "smtphost", global.smtphost);
     readRyamlScalar(config, "mail_from", global.mail_from);
-    readRyamlScalar(config, "adminmail_from", global.adminmail_from); // MCW
+    readRyamlScalar(config, "adminmail_from", global.adminmail_from);      // MCW
     readRyamlScalar(config, "default_workspace", global.defaultWorkspace); // SPEC:CHANGE: accept alias
     readRyamlScalar(config, "default", global.defaultWorkspace);
     readRyamlScalar(config, "duration", global.maxduration);
