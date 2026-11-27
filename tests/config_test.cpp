@@ -709,3 +709,37 @@ workspaces:
         REQUIRE_FALSE(config2.validate());
     }
 }
+
+TEST_CASE("config: adminmail_from (MCW)", "[config][mcw]") {
+    const std::string base = R"(
+clustername: aName
+smtphost: localhost
+mail_from: help@mydomain.de
+adminmail: [systems@mydomain.de]
+default: fs1
+duration: 10
+maxextensions: 1
+dbuid: 2
+dbgid: 2
+workspaces:
+  fs1:
+    keeptime: 1
+    spaces: [/tmp]
+    database: /tmp
+    deleted: .del
+)";
+
+    SECTION("falls back to mail_from when not set") {
+        auto config = Config(base);
+        REQUIRE(config.mailfrom() == "help@mydomain.de");
+        REQUIRE(config.adminmailfrom() == "help@mydomain.de");
+        REQUIRE(config.validate());
+    }
+
+    SECTION("is used for admin mails when set, user mails keep mail_from") {
+        auto config = Config(base + "adminmail_from: admin@mydomain.de\n");
+        REQUIRE(config.mailfrom() == "help@mydomain.de");
+        REQUIRE(config.adminmailfrom() == "admin@mydomain.de");
+        REQUIRE(config.validate());
+    }
+}

@@ -51,6 +51,7 @@ struct Global_config {
     string clustername;      // name of cluster for mails
     string smtphost;         // smtp host for sending mails
     string mail_from;        // sender for mails
+    string adminmail_from;   // MCW: sender for mails to adminmail (empty: use mail_from)
     string defaultWorkspace; // workspace to use if several are allowed
     strings admins;          // people allowed to see all workspaces
     strings debugusers;      // users allowed to see debug output
@@ -162,6 +163,8 @@ class Config {
     string defaultworkspace() const { return global.defaultWorkspace; };
     int deldirtimeout() const { return global.deldirtimeout; };
     string mailfrom() const { return global.mail_from; };
+    // MCW: sender for mails to adminmail; falls back to mail_from when adminmail_from is not set
+    string adminmailfrom() const { return global.adminmail_from.empty() ? global.mail_from : global.adminmail_from; };
     string smtphost() const { return global.smtphost; };
     vector<string> admins() const { return global.admins; };
     vector<string> adminmail() const { return global.adminmail; };
