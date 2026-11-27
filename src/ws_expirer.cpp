@@ -38,6 +38,7 @@
 #include <memory>
 #include <string>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <vector>
 
 #include "config.h"
@@ -630,6 +631,45 @@ static clean_stray_result_t clean_stray_directories(const Config& config, const 
     return result;
 }
 
+// MCW: the user -> mail map (usermailmap in the config), read once per run. It is
+// read as root, so it must be a regular file owned by root (or by the user running
+// ws_expirer, for tests) that nobody else can write.
+static const mail::UserMailMap& userMailMap(const Config& config) {
+    static bool loaded = false;
+    static mail::UserMailMap map;
+    if (loaded)
+        return map;
+    loaded = true;
+    const auto path = config.usermailmap();
+    if (path.empty())
+        return map;
+    struct stat st;
+    if (lstat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) {
+        spdlog::error("usermailmap {} is missing or not a regular file, mails go to the address in the DB entry", path);
+        return map;
+    }
+    if ((st.st_uid != 0 && st.st_uid != geteuid()) || (st.st_mode & (S_IWGRP | S_IWOTH))) {
+        spdlog::error("usermailmap {} must be owned by root and not group/world writable, ignoring it", path);
+        return map;
+    }
+    try {
+        map = mail::parseUserMailMap(utils::readFileNoFollow(path, 64 * 1024 * 1024));
+        spdlog::info("usermailmap {}: {} users", path, map.size());
+    } catch (const std::exception& e) {
+        spdlog::error("could not read usermailmap {}: {}", path, e.what());
+    }
+    return map;
+}
+
+// MCW: where to mail the owner of dbentry (see mail::resolveRecipient)
+static std::string recipientFor(const Config& config, DBEntry* dbentry) {
+    const auto stored = dbentry->getMailaddress();
+    const auto addr = mail::resolveRecipient(stored, dbentry->getUsername(), userMailMap(config));
+    if (addr.find('@') == std::string::npos && !config.usermailmap().empty())
+        spdlog::error("    no mail address for {} in usermailmap, using <{}>", dbentry->getUsername(), addr);
+    return addr;
+}
+
 // expire workspace DB entries and moves the workspace to deleted directory
 // deletes expired workspace in second phase
 static expire_result_t expire_workspaces(const Config& config, const string fs, const bool dryrun,
@@ -766,7 +806,7 @@ static expire_result_t expire_workspaces(const Config& config, const string fs, 
                         if ((userconfig.getExpirationMail() && !dbentry->getMailaddress().empty()) ||
                             (dbentry->getReminder() > 0)) {
                             std::vector<std::string> mail_to;
-                            mail_to.push_back(dbentry->getMailaddress());
+                            mail_to.push_back(recipientFor(config, dbentry.get()));
                             std::string clustername = config.clustername();
                             long keeptime = config.getFsConfig(fs).keeptime;
 
@@ -802,10 +842,11 @@ static expire_result_t expire_workspaces(const Config& config, const string fs, 
                 } else {
                     result.active_mails++;
                     if (dryrun) {
-                        spdlog::info("    would send reminder mail to {} for entry {}", dbentry->getMailaddress(), id);
+                        spdlog::info("    would send reminder mail to {} for entry {}",
+                                     recipientFor(config, dbentry.get()), id);
                     } else {
                         std::vector<std::string> mail_to;
-                        mail_to.push_back(dbentry->getMailaddress());
+                        mail_to.push_back(recipientFor(config, dbentry.get()));
                         std::string clustername = config.clustername();
 
                         std::string completeMail =

@@ -742,4 +742,11 @@ workspaces:
         REQUIRE(config.adminmailfrom() == "admin@mydomain.de");
         REQUIRE(config.validate());
     }
+
+    SECTION("usermailmap (MCW) is empty unless set") {
+        REQUIRE(Config(base).usermailmap() == "");
+        auto config = Config(base + "usermailmap: /etc/ws_user_mail.map\n");
+        REQUIRE(config.usermailmap() == "/etc/ws_user_mail.map");
+        REQUIRE(config.validate());
+    }
 }
