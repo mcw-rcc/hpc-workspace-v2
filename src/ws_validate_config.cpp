@@ -172,6 +172,12 @@ int main(int argc, char** argv) {
                      "<mail>\" clause to toplevel");
     }
 
+    // MCW: optional sender for the mails to adminmail
+    auto adminmail_from = config.adminmailfrom();
+    if (adminmail_from != "" && adminmail_from != mail_from) {
+        fmt::println("adminmail_from: {}", adminmail_from);
+    }
+
     // default/default_workspace
     std::string defaultws = config.defaultworkspace();
     if (defaultws != "") {

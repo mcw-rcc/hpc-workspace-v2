@@ -295,6 +295,15 @@ expiring workspaces and to send calendar entries.
 #### `mail_from`
 
 Used as sender in any mail, should be of the form ```user@domain```.
+With `adminmail_from` set, it is used only for mails to users (reminders and
+expiration notices).
+
+#### `adminmail_from` (MCW)
+
+Optional sender for the mails `ws_expirer` sends to `adminmail` (error mails and
+the summary mail), of the form ```user@domain```. If not set, `mail_from` is used.
+This lets user mails come from a helpdesk address while admin alerts come from
+an admin address.
 
 #### `default` (alias: `default_workspace`)
 

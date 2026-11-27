@@ -404,8 +404,8 @@ static clean_stray_result_t clean_stray_directories(const Config& config, const 
     std::vector<string> spaces = config.getFsConfig(fs).spaces;
     std::vector<dir_t> dirs; // list of all directories in all spaces of 'fs'
 
-    // Infos needed to send errormails
-    std::string mail_from = config.mailfrom();
+    // Infos needed to send errormails (MCW: admin mails use adminmail_from)
+    std::string mail_from = config.adminmailfrom();
     std::vector<std::string> adminmails = config.adminmail();
     std::string smtpUrl = "smtp://" + config.smtphost();
 
@@ -640,6 +640,7 @@ static expire_result_t expire_workspaces(const Config& config, const string fs, 
     // Infos needed for errormails and remindermails
     std::string smtpUrl = "smtp://" + config.smtphost();
     std::string mail_from = config.mailfrom();
+    std::string adminmail_from = config.adminmailfrom(); // MCW: sender for the error mails to admins
     std::vector<std::string> adminmails = config.adminmail();
 
     // vector<string> spaces = config.getFsConfig(fs).spaces;
@@ -655,13 +656,13 @@ static expire_result_t expire_workspaces(const Config& config, const string fs, 
         // Sending Error Mail
         std::string subject = e.what();
 
-        if (smtpUrl == "" || mail_from == "" || adminmails.size() == 0) {
+        if (smtpUrl == "" || adminmail_from == "" || adminmails.size() == 0) {
             spdlog::warn(
                 "No smtphost or mailfrom available to contact users or admins, please check your system config");
         } else {
-            std::string completeMail = generateErrorMail(mail_from, adminmails, subject);
+            std::string completeMail = generateErrorMail(adminmail_from, adminmails, subject);
             try {
-                if (!mail::sendCurl(smtpUrl, mail_from, adminmails, completeMail)) {
+                if (!mail::sendCurl(smtpUrl, adminmail_from, adminmails, completeMail)) {
                     spdlog::error("Failed to send email, please check the mailaddress in the DB Entry");
                 }
             } catch (const std::exception& e) {
@@ -1177,7 +1178,7 @@ int main(int argc, char** argv) {
 
     if (summarymail) {
         std::string smtpUrl = "smtp://" + config.smtphost();
-        std::string mail_from = config.mailfrom();
+        std::string mail_from = config.adminmailfrom(); // MCW: summary goes to admins
         std::vector<std::string> adminmails = config.adminmail();
         std::string completeMail = generateSummaryMail(mail_from, adminmails, runinfo, summary);
         try {
