@@ -42,6 +42,7 @@
 #include "fmt/core.h"
 #include "fmt/format.h"
 #include "user.h"
+#include <sys/stat.h>
 
 namespace utils {
 
@@ -52,7 +53,7 @@ class SrcPos {
     std::string func;
 
   public:
-    SrcPos(const char* _file, const int _line, const char* _func) : file(_file), line(_line), func(_func) {};
+    SrcPos(const char* _file, const int _line, const char* _func) : file(_file), line(_line), func(_func){};
     std::string getSrcPos() { return fmt::format("{}:{}[{}]", file, line, func); }
 };
 
@@ -106,6 +107,10 @@ auto parseACL(const std::vector<std::string> acl)
 // so the deadline is not hard but soft and can be missed significantly
 // deadline==0 disables the deadline
 // returns the number of files deleted
+// MCW: true if both stats are the same directory (device + inode), ignoring timestamps
+// and sizes, which NFS clients may report differently from cache and from the server
+bool same_directory(const struct stat& before, const struct stat& opened);
+
 std::size_t rmtree(std::string path, const std::time_t deadline);
 
 // delete a directory and its contents, should be temper safe

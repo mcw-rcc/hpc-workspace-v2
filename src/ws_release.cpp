@@ -344,16 +344,14 @@ bool release(const Config& config, const po::variables_map& opt, string filesyst
                     if (rmdir(src.c_str()) == 0) {
                         toplevel_gone = true;
                     } else {
-                        spdlog::error("could not remove empty directory {}: {}", src, strerror(errno));
+                        spdlog::error("could not remove directory {}: {}", src, strerror(errno));
                     }
                 } else {
-                    spdlog::error("could not remove empty directory {}: can not raise to root", src);
+                    spdlog::error("could not remove directory {}: can not raise to root", src);
                 }
             } else if (!toplevel_gone) {
-                spdlog::error("could not remove empty directory {}", src);
+                spdlog::error("could not remove directory {}", src);
             }
-            if (!toplevel_gone)
-                spdlog::info("the empty directory is left for ws_expirer to clean up");
 
             // back to the DB identity (set_identity anchors at root itself)
             caps.lower_cap({CAP_DAC_OVERRIDE}, dbentry->getConfig()->dbuid(),
@@ -364,7 +362,14 @@ bool release(const Config& config, const po::variables_map& opt, string filesyst
             // remove DB entry
             dbentry->remove();
 
-            spdlog::info("workspace {} and data deleted, can not be restored.", name);
+            if (toplevel_gone) {
+                spdlog::info("workspace {} and data deleted, can not be restored.", name);
+            } else {
+                // MCW: do not claim the data is gone when part of it is still there
+                spdlog::info("workspace {} released, can not be restored; some data could not be deleted and is "
+                             "left in {} for ws_expirer to clean up.",
+                             name, src);
+            }
 
         } else { // no delete-data, just release workspace
 
