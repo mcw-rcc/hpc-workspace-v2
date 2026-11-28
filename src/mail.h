@@ -47,7 +47,8 @@ UserMailMap parseUserMailMap(const std::string& content);
 // MCW: address to mail a workspace owner at. An address the user gave (-m or
 // ~/.ws_user.conf, it contains '@') is kept. Otherwise ws_allocate stored the bare
 // username, so the owner (or that username) is looked up in the map. Returns the
-// stored value unchanged when there is no map entry.
+// stored value unchanged when there is no map entry, or the owner's username when
+// nothing was stored.
 std::string resolveRecipient(const std::string& stored, const std::string& owner, const UserMailMap& map);
 
 } // namespace mail

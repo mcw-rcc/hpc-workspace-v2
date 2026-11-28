@@ -589,12 +589,13 @@ setup() {
     ws_allocate --config /tmp/ws/ws_reminddefault.conf DEFAULT_FAR 10
     ws_editdb --config /tmp/ws/ws_reminddefault.conf --not-kidding --add-time -4 'DEFAULT_REMIND'
     # without reminderdefault: no -r, so no reminder (upstream behaviour)
+    # (--partial on one line: a --regexp with .* would match across lines)
     run ws_expirer --config bats/ws.conf -c
-    refute_output --regexp "sending reminder mail.*DEFAULT_REMIND"
+    refute_output --partial "for entry ${USER}-DEFAULT_REMIND"
     # with reminderdefault: 2: 1 day left gets a reminder, 10 days left does not
     run ws_expirer --config /tmp/ws/ws_reminddefault.conf -c
-    assert_output --regexp "sending reminder mail.*DEFAULT_REMIND"
-    refute_output --regexp "sending reminder mail.*DEFAULT_FAR"
+    assert_output --partial "sending reminder mail to [\"${USER}\"] for entry ${USER}-DEFAULT_REMIND"
+    refute_output --partial "for entry ${USER}-DEFAULT_FAR"
     assert_success
     ws_release --config /tmp/ws/ws_reminddefault.conf DEFAULT_REMIND
     ws_release --config /tmp/ws/ws_reminddefault.conf DEFAULT_FAR
