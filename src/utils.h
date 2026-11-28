@@ -210,6 +210,11 @@ std::string getOwner(const std::string& wsid);
 long extensionAllowedAt(const long periodstart, const long expiration, const int thresholdpercent,
                         const int windowdays = 0);
 
+// MCW: how many days before expiration reminder mails start for a workspace: its own
+// reminder (ws_allocate -r, ~/.ws_user.conf) when set, else the global reminderdefault.
+// 0 means no reminder. Upstream reads reminderdefault but never applies it.
+int effectiveReminder(const int entryreminder, const int reminderdefault);
+
 } // namespace utils
 
 #endif
