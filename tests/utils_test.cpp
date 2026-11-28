@@ -645,4 +645,24 @@ TEST_CASE("mail::resolveRecipient", "[mail][mcw]") {
     // not in the map: unchanged
     REQUIRE(mail::resolveRecipient("zz99999", "zz99999", m) == "zz99999");
     REQUIRE(mail::resolveRecipient("zz99999", "zz99999", {}) == "zz99999");
+    // nothing stored and not in the map: the owner's local account, never an empty address
+    REQUIRE(mail::resolveRecipient("", "zz99999", m) == "zz99999");
+    REQUIRE(mail::resolveRecipient("", "zz99999", {}) == "zz99999");
+}
+
+// MCW: reminderdefault applies to entries that have no reminder of their own
+TEST_CASE("utils::effectiveReminder", "[utils][mcw]") {
+    SECTION("entry reminder wins when set") {
+        REQUIRE(utils::effectiveReminder(3, 7) == 3);
+        REQUIRE(utils::effectiveReminder(10, 7) == 10);
+        REQUIRE(utils::effectiveReminder(3, 0) == 3);
+    }
+    SECTION("no entry reminder falls back to reminderdefault") {
+        REQUIRE(utils::effectiveReminder(0, 7) == 7);
+        REQUIRE(utils::effectiveReminder(-1, 7) == 7);
+    }
+    SECTION("neither set means no reminder") {
+        REQUIRE(utils::effectiveReminder(0, 0) == 0);
+        REQUIRE(utils::effectiveReminder(0, -3) == 0);
+    }
 }

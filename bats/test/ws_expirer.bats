@@ -580,3 +580,26 @@ setup() {
     [ -f ~/.ws_user.conf.bats-save ] && mv ~/.ws_user.conf.bats-save ~/.ws_user.conf
     true
 }
+
+# MCW: reminderdefault sends reminders for workspaces allocated without -r
+@test "ws_expirer reminderdefault reminds workspaces without -r" {
+    [ -f ~/.ws_user.conf ] && mv ~/.ws_user.conf ~/.ws_user.conf.bats-save
+    { cat bats/ws.conf; echo "reminderdefault: 2"; } > /tmp/ws/ws_reminddefault.conf
+    ws_allocate --config /tmp/ws/ws_reminddefault.conf DEFAULT_REMIND 5
+    ws_allocate --config /tmp/ws/ws_reminddefault.conf DEFAULT_FAR 10
+    ws_editdb --config /tmp/ws/ws_reminddefault.conf --not-kidding --add-time -4 'DEFAULT_REMIND'
+    # without reminderdefault: no -r, so no reminder (upstream behaviour)
+    # (--partial on one line: a --regexp with .* would match across lines)
+    run ws_expirer --config bats/ws.conf -c
+    refute_output --partial "for entry ${USER}-DEFAULT_REMIND"
+    # with reminderdefault: 2: 1 day left gets a reminder, 10 days left does not
+    run ws_expirer --config /tmp/ws/ws_reminddefault.conf -c
+    assert_output --partial "sending reminder mail to [\"${USER}\"] for entry ${USER}-DEFAULT_REMIND"
+    refute_output --partial "for entry ${USER}-DEFAULT_FAR"
+    assert_success
+    ws_release --config /tmp/ws/ws_reminddefault.conf DEFAULT_REMIND
+    ws_release --config /tmp/ws/ws_reminddefault.conf DEFAULT_FAR
+    rm -f /tmp/ws/ws_reminddefault.conf
+    [ -f ~/.ws_user.conf.bats-save ] && mv ~/.ws_user.conf.bats-save ~/.ws_user.conf
+    true
+}

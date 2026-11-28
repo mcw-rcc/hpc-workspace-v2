@@ -239,7 +239,9 @@ acl() { nfs4_getfacl "$1" | grep -v '^#'; }
 @test "nfs4 unshare only rewrites files that hold the principal" {
     ws_share share ws $U
     # a file created later by someone else, which never got the grant
-    echo x > "$WS/sub/other.txt"; chown daemon "$WS/sub/other.txt"
+    echo x > "$WS/sub/other.txt"
+    # only root can give it to another owner; the non-sudo CI run keeps it ours
+    if [ "$(id -u)" = 0 ]; then chown daemon "$WS/sub/other.txt"; fi
     run ws_share unshare ws $U
     assert_success
     run grep -c -- "-e .*other.txt" "$NFS4_MOCK_STORE/calls.log"

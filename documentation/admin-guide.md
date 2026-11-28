@@ -342,6 +342,14 @@ Defaults to 1 day.
 if this is set, users always get a reminder email n days before expiration.
 If no email is set, the mail is send to local username.
 
+(MCW) `ws_expirer` applies this to every workspace whose DB entry has no reminder of
+its own (`reminder: 0`, i.e. allocated without `-r` and without a reminder in
+`~/.ws_user.conf`), including entries created before the setting was added. A
+reminder given with `-r` still wins. As with `-r`, the mail goes out on every
+expirer run inside the window, so with `reminderdefault: 7` and a nightly expirer
+the owner gets one mail a night for the last 7 days. Such entries also get the
+expiration mail on filesystems with `expirationmail` enabled.
+
 #### `maxextensions`
 
 Maximum number of times a user can extend a workspace, can be overwritten in

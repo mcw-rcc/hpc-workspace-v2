@@ -908,6 +908,13 @@ long extensionAllowedAt(const long periodstart, const long expiration, const int
     return static_cast<long>(allowed);
 }
 
+int effectiveReminder(const int entryreminder, const int reminderdefault) {
+    if (entryreminder > 0) {
+        return entryreminder;
+    }
+    return reminderdefault > 0 ? reminderdefault : 0;
+}
+
 } // end of namespace utils
 
 // internal recursive functions, based on file handles

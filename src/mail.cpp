@@ -157,6 +157,10 @@ std::string resolveRecipient(const std::string& stored, const std::string& owner
         return it->second;
     if (auto it = map.find(stored); !stored.empty() && it != map.end())
         return it->second;
+    // nothing stored (no -r/-m at allocation, e.g. a reminderdefault reminder) and not in
+    // the map: mail the owner's local account, as the admin guide promises
+    if (stored.empty())
+        return owner;
     return stored;
 }
 

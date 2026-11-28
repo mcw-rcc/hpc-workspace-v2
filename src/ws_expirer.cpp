@@ -803,8 +803,9 @@ static expire_result_t expire_workspaces(const Config& config, const string fs, 
                             // FIXME: could be parsed here and passed as object not string
                         }
                         UserConfig userconfig(user_conf);
+                        // MCW: reminderdefault counts as a reminder, so entries without -r get mail too
                         if ((userconfig.getExpirationMail() && !dbentry->getMailaddress().empty()) ||
-                            (dbentry->getReminder() > 0)) {
+                            (utils::effectiveReminder(dbentry->getReminder(), config.reminderdefault()) > 0)) {
                             std::vector<std::string> mail_to;
                             mail_to.push_back(recipientFor(config, dbentry.get()));
                             std::string clustername = config.clustername();
@@ -835,8 +836,9 @@ static expire_result_t expire_workspaces(const Config& config, const string fs, 
                          formatTimedelta(expiration - time((long*)0L)), id);
             result.active_keep++;
             // Send reminder emails
-            auto reminder = dbentry->getReminder();
-            if (time((long*)0L) > (expiration - (reminder * (24 * 3600)))) {
+            // MCW: fall back to the global reminderdefault when the entry has no reminder of its own
+            auto reminder = utils::effectiveReminder(dbentry->getReminder(), config.reminderdefault());
+            if (reminder > 0 && time((long*)0L) > (expiration - (reminder * (24 * 3600)))) {
                 if (smtpUrl == "" || mail_from == "") {
                     spdlog::warn("No smtphost or mailfrom available to contact users, please check your system config");
                 } else {
